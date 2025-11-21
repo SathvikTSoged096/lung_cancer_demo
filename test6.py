@@ -23,7 +23,8 @@ import tensorflow as tf
 from tensorflow.keras.models import load_model as keras_load_model
 
 # ---------- CONFIG ----------
-MODEL_PATH = r"C:\Users\UDAY\Documents\majorProject\anotherProject\resnet50_lung_cancer.h5"
+MODEL_URL = "https://drive.google.com/file/d/1s7c8s4nYH0oBWGBLNb_d_q5Loc0hl4MN/view?usp=drive_link"
+MODEL_PATH = "resnet50_lung_cancer.h5"
 INPUT_SIZE = (224, 224)
 CLASS_MAP = {0: "Normal", 1: "Benign", 2: "Malignant"}
 # ----------------------------
@@ -379,5 +380,6 @@ with col2:
             st.markdown(f"*You:* {text}")
         else:
             st.markdown(f"*Bot:* {text}")
+
 
 
