@@ -3,3 +3,5 @@ tensorflow
 numpy
 Pillow
 opencv-python
+gTTS
+requests
