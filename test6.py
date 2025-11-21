@@ -12,7 +12,7 @@ import os
 import io
 import tempfile
 import traceback
-
+import requests
 import streamlit as st
 import numpy as np
 from PIL import Image
@@ -23,25 +23,46 @@ import tensorflow as tf
 from tensorflow.keras.models import load_model as keras_load_model
 
 # ---------- CONFIG ----------
-MODEL_URL = "https://drive.google.com/file/d/1s7c8s4nYH0oBWGBLNb_d_q5Loc0hl4MN/view?usp=drive_link"
+# Google Drive direct download link for the model
+MODEL_URL = "https://drive.google.com/uc?export=download&id=1s7c8s4nYH0oBWGBLNb_d_q5Loc0hl4MN"
 MODEL_PATH = "resnet50_lung_cancer.h5"
 INPUT_SIZE = (224, 224)
 CLASS_MAP = {0: "Normal", 1: "Benign", 2: "Malignant"}
 # ----------------------------
 
 st.set_page_config(page_title="Lung Cancer Demo Chatbot (Kannada)", layout="wide")
-logo = Image.open(r"C:\Users\UDAY\Documents\majorProject\anotherProject\logo2.png")
-st.image(logo, width=150) 
-# --- Model loader (cached) ---
+
+# Try loading logo from local file (place logo2.png in the same folder as this script)
+try:
+    logo = Image.open("logo2.png")
+    st.image(logo, width=150)
+except Exception:
+    # If logo not found, just skip without crashing
+    pass
+
+
+# --- Model loader (cached, with download from Drive) ---
 @st.cache_resource(show_spinner=False)
-def load_keras_model(path):
-    if path is None or not os.path.exists(path):
-        return None, f"Model not found at: {path}"
+def load_keras_model(path: str):
+    """
+    Downloads the model from Google Drive if not present locally,
+    then loads it with Keras. Cached so it only happens once.
+    """
     try:
+        if not os.path.exists(path):
+            # Download model from Google Drive
+            r = requests.get(MODEL_URL, stream=True)
+            r.raise_for_status()
+            with open(path, "wb") as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+
         model = keras_load_model(path)
         return model, f"Loaded model from: {path}"
     except Exception as e:
         return None, f"Error loading model: {e}"
+
 
 # --- Preprocess helpers ---
 def preprocess_slice(slice_img, target_size=INPUT_SIZE):
@@ -52,6 +73,7 @@ def preprocess_slice(slice_img, target_size=INPUT_SIZE):
     img = img / 255.0
     return img.astype(np.float32)
 
+
 # --- Find last conv layer robustly ---
 def find_last_conv_layer(model):
     for layer in reversed(model.layers):
@@ -61,6 +83,7 @@ def find_last_conv_layer(model):
         if layer.__class__.__name__.lower().startswith('conv'):
             return layer.name
     raise ValueError("No convolutional layer found in model to compute Grad-CAM.")
+
 
 # --- Grad-CAM helper (robust to multi-output models) ---
 def make_gradcam_heatmap(img_array, model, pred_index=None, last_conv_layer_name=None):
@@ -74,7 +97,10 @@ def make_gradcam_heatmap(img_array, model, pred_index=None, last_conv_layer_name
     if last_conv_layer_name is None:
         last_conv_layer_name = find_last_conv_layer(model)
 
-    grad_model = tf.keras.models.Model([model.inputs], [model.get_layer(last_conv_layer_name).output, model.output])
+    grad_model = tf.keras.models.Model(
+        [model.inputs],
+        [model.get_layer(last_conv_layer_name).output, model.output]
+    )
 
     with tf.GradientTape() as tape:
         conv_outputs, predictions = grad_model(img_array)
@@ -106,6 +132,7 @@ def make_gradcam_heatmap(img_array, model, pred_index=None, last_conv_layer_name
     heatmap /= max_val
     return heatmap.numpy().astype(np.float32)
 
+
 # --- Overlay helper ---
 def overlay_heatmap_on_image(orig_rgb, heatmap, thresh=0.35):
     # orig_rgb: uint8 RGB
@@ -132,14 +159,21 @@ def overlay_heatmap_on_image(orig_rgb, heatmap, thresh=0.35):
 
     return overlay_rgb, annotated_rgb
 
+
 # --- Robust predict handling + Grad-CAM pipeline ---
 def run_inference_with_gradcam(model, volume_array, return_gradcam=True):
     try:
         if model is None:
             mean_val = float(np.nanmean(volume_array))
-            score = 1.0 / (1.0 + np.exp(-0.01*(mean_val-100)))
+            score = 1.0 / (1.0 + np.exp(-0.01 * (mean_val - 100)))
             label = "ಸ್ಥೂಲ ಸಂಶಯ (Malignant)" if score > 0.5 else "ಸಂದೇಹದಿಲ್ಲ (Benign)"
-            return {"label": label, "score": float(score), "probs": None, "notes": "Demo inference; replace with real model.", "gradcam": None}
+            return {
+                "label": label,
+                "score": float(score),
+                "probs": None,
+                "notes": "Demo inference; replace with real model.",
+                "gradcam": None
+            }
 
         arr = np.squeeze(volume_array)
         if arr.ndim == 2:
@@ -169,7 +203,11 @@ def run_inference_with_gradcam(model, volume_array, return_gradcam=True):
         if preds.ndim == 1:
             preds = np.expand_dims(preds, axis=0)
         if preds.ndim != 2:
-            return {"error": f"Unexpected prediction shape: {preds.shape}", "trace": None, "gradcam": None}
+            return {
+                "error": f"Unexpected prediction shape: {preds.shape}",
+                "trace": None,
+                "gradcam": None
+            }
         # apply softmax if needed
         row_sums = preds.sum(axis=1)
         if not np.allclose(row_sums, 1.0, atol=1e-3):
@@ -181,7 +219,11 @@ def run_inference_with_gradcam(model, volume_array, return_gradcam=True):
         score = float(mean_probs[class_idx])
 
         label_en = CLASS_MAP.get(class_idx, f"class_{class_idx}")
-        kn_map = {"Normal": "ಸಾಮಾನ್ಯ (Normal)", "Benign": "ಸಂದೇಹವಿಲ್ಲ (Benign)", "Malignant": "ಸ್ಥೂಲ ಸಂಶಯ (Malignant)"}
+        kn_map = {
+            "Normal": "ಸಾಮಾನ್ಯ (Normal)",
+            "Benign": "ಸಂದೇಹವಿಲ್ಲ (Benign)",
+            "Malignant": "ಸ್ಥೂಲ ಸಂಶಯ (Malignant)"
+        }
         label_kn = kn_map.get(label_en, label_en)
 
         gradcam_info = None
@@ -198,22 +240,42 @@ def run_inference_with_gradcam(model, volume_array, return_gradcam=True):
                 except Exception as e:
                     st.info(f"Last conv detection: {e}")
                     last_conv = None
-                heatmap = make_gradcam_heatmap(single_input, model, pred_index=class_idx, last_conv_layer_name=last_conv)
+                heatmap = make_gradcam_heatmap(
+                    single_input,
+                    model,
+                    pred_index=class_idx,
+                    last_conv_layer_name=last_conv
+                )
                 if heatmap is None or heatmap.size == 0:
                     raise RuntimeError("Heatmap empty")
-                overlay_rgb, annotated_rgb = overlay_heatmap_on_image(orig_resized[rep_idx], heatmap, thresh=0.35)
-                gradcam_info = {"slice_index": rep_idx, "overlay_rgb": overlay_rgb, "annotated_rgb": annotated_rgb}
+                overlay_rgb, annotated_rgb = overlay_heatmap_on_image(
+                    orig_resized[rep_idx],
+                    heatmap,
+                    thresh=0.35
+                )
+                gradcam_info = {
+                    "slice_index": rep_idx,
+                    "overlay_rgb": overlay_rgb,
+                    "annotated_rgb": annotated_rgb
+                }
             except Exception as e:
                 gradcam_info = {"error": str(e), "trace": traceback.format_exc()}
 
-        return {"label": label_kn, "score": score, "probs": mean_probs.tolist(), "notes": "Model-based inference (mean over slices).", "gradcam": gradcam_info}
+        return {
+            "label": label_kn,
+            "score": score,
+            "probs": mean_probs.tolist(),
+            "notes": "Model-based inference (mean over slices).",
+            "gradcam": gradcam_info
+        }
 
     except Exception as e:
         return {"error": str(e), "trace": traceback.format_exc(), "gradcam": None}
 
+
 # --- Kannada response templates & NLU ---
 KANNADA_TEMPLATES = {
-    "greeting": "ನಮಸ್ತೆ! 나는 ನಿಮ್ಮ ಲಂಗ್-ಕ್ಯಾನ್ಸರ್ ಪ್ರೋಟೋಟೈಪ್ ಚಾಟ್‌ಬಾಟ್. ನಿಮಗೆ ಹೇಗೆ ಸಹಾಯ ಮಾಡಬಹುದು?",
+    "greeting": "ನಮಸ್ತೆ! ನಾನು ನಿಮ್ಮ ಲಂಗ್-ಕ್ಯಾನ್ಸರ್ ಪ್ರೋಟೋಟೈಪ್ ಚಾಟ್‌ಬಾಟ್. ನಿಮಗೆ ಹೇಗೆ ಸಹಾಯ ಮಾಡಬಹುದು?",
     "inference_result": "ಮೌಲ್ಯಮಾಪನ ಫಲಿತಾಂಶ:\n\nಫಲಿತಾಂಶ: {label}\nconfidence (ಸ್ಕೋರ್): {score:.3f}\nನೋಟ್: {notes}",
     "explain_how": "ಈ ಮಾಡೆಲ್ 3D CT ವಾಲ್ಯೂಮ್ ಗಳನ್ನು ಒಳಗೆ ತೆಗೆದುಕೊಂಡು ಕಂಡುಬರುವ ಗುಣಲಕ್ಷಣಗಳನ್ನು ಆಧರಿಸಿ ಅನುಮಾನಿತ ತಂತು/ನೋಡ್ ಗಳನ್ನು ಗುರುತಿಸುತ್ತದೆ.",
     "accuracy": "ಮಾಡೆಲ್‌ಗಾಗಿ ಉದಾಹರಣೆ accuracy = {acc:.2f}.",
@@ -221,21 +283,23 @@ KANNADA_TEMPLATES = {
     "thanks": "ಧನ್ಯವಾದಗಳು!"
 }
 
+
 def detect_intent(user_text):
     t = user_text.strip().lower()
-    if any(x in t for x in ["hello","hi","namaste","ನಮಸ್ತೆ","ಹಲೋ","hey"]):
+    if any(x in t for x in ["hello", "hi", "namaste", "ನಮಸ್ತೆ", "ಹಲೋ", "hey"]):
         return "greeting"
-    if any(x in t for x in ["predict","inference","run inference","result","ಫಲ","ಫಲಿತಾಂಶ"]):
+    if any(x in t for x in ["predict", "inference", "run inference", "result", "ಫಲ", "ಫಲಿತಾಂಶ"]):
         return "predict"
-    if any(x in t for x in ["how","work","ಹೇಗೆ","ಮಾಡುತ್ತದೆ","explain","ವಿವರಣೆ"]):
+    if any(x in t for x in ["how", "work", "ಹೇಗೆ", "ಮಾಡುತ್ತದೆ", "explain", "ವಿವರಣೆ"]):
         return "explain"
-    if any(x in t for x in ["accuracy","precision","sensitivity","acc"]):
+    if any(x in t for x in ["accuracy", "precision", "sensitivity", "acc"]):
         return "accuracy"
-    if any(x in t for x in ["limitations","limits","ಸೀಮಿತತೆ"]):
+    if any(x in t for x in ["limitations", "limits", "ಸೀಮಿತತೆ"]):
         return "limitations"
-    if any(x in t for x in ["thanks","thank","ಧನ್ಯ","bye"]):
+    if any(x in t for x in ["thanks", "thank", "ಧನ್ಯ", "bye"]):
         return "thanks"
     return "unknown"
+
 
 def answer_in_kannada(intent, context=None):
     if intent == "greeting":
@@ -253,6 +317,7 @@ def answer_in_kannada(intent, context=None):
         return "ದಯವಿಟ್ಟು JPG ಸ್ಲೈಸುಗಳನ್ನು ಅಥವಾ .npy ಫೈಲ್ ಅನ್ನು ಅಪ್‌ಲೋಡ್ ಮಾಡಿ ಮತ್ತು 'Run Inference' ಒತ್ತಿ."
     return "ಕ್ಷಮಿಸಿ, ನನಗೆ ಅರ್ಥವಾಗಲಿಲ್ಲ."
 
+
 # --- TTS helper ---
 def tts_kannada(text):
     try:
@@ -264,6 +329,7 @@ def tts_kannada(text):
         st.error("TTS error: " + str(e))
         return None
 
+
 # --- Streamlit UI ---
 st.title("Lung Cancer Detector")
 st.markdown("*DISCLAIMER:* This is a demo prototype. Not a medical diagnosis tool.")
@@ -272,18 +338,26 @@ col1, col2 = st.columns([1, 1])
 
 with col1:
     st.header("Model / Inference")
-    model, model_msg = load_keras_model(MODEL_PATH)
+
+    # Load (and if needed, download) model with spinner
+    with st.spinner("Loading model (first time may take a while)..."):
+        model, model_msg = load_keras_model(MODEL_PATH)
+
     if model is not None:
         st.success(model_msg)
     else:
         st.info(model_msg)
 
-    uploaded_files = st.file_uploader("Upload CT scan slices (.jpg) or a single .npy", type=["jpg","jpeg","npy"], accept_multiple_files=True)
+    uploaded_files = st.file_uploader(
+        "Upload CT scan slices (.jpg) or a single .npy",
+        type=["jpg", "jpeg", "npy"],
+        accept_multiple_files=True
+    )
     arr = None
 
     if uploaded_files:
         npy_files = [f for f in uploaded_files if f.name.lower().endswith('.npy')]
-        jpg_files = [f for f in uploaded_files if f.name.lower().endswith(('.jpg','.jpeg'))]
+        jpg_files = [f for f in uploaded_files if f.name.lower().endswith(('.jpg', '.jpeg'))]
 
         if len(npy_files) == 1 and len(uploaded_files) == 1:
             arr = np.load(io.BytesIO(npy_files[0].read()))
@@ -314,7 +388,11 @@ with col1:
                     if result.get("trace"):
                         st.text(result.get("trace"))
                 else:
-                    out_text = KANNADA_TEMPLATES["inference_result"].format(label=result.get("label","N/A"), score=result.get("score",0.0), notes=result.get("notes",""))
+                    out_text = KANNADA_TEMPLATES["inference_result"].format(
+                        label=result.get("label", "N/A"),
+                        score=result.get("score", 0.0),
+                        notes=result.get("notes", "")
+                    )
                     st.markdown("### ಫಲಿತಾಂಶ (Kannada)")
                     st.code(out_text)
 
@@ -337,9 +415,17 @@ with col1:
                         st.markdown(f"**Representative slice index:** {rep_idx}")
                         c1, c2 = st.columns(2)
                         with c1:
-                            st.image(gc["annotated_rgb"], caption="Original slice with bounding box (red)", use_container_width=True)
+                            st.image(
+                                gc["annotated_rgb"],
+                                caption="Original slice with bounding box (red)",
+                                use_container_width=True,
+                            )
                         with c2:
-                            st.image(gc["overlay_rgb"], caption="Grad-CAM overlay (heatmap)", use_container_width=True)
+                            st.image(
+                                gc["overlay_rgb"],
+                                caption="Grad-CAM overlay (heatmap)",
+                                use_container_width=True,
+                            )
                     else:
                         st.info("Grad-CAM: unexpected format; see logs.")
 
@@ -361,11 +447,15 @@ with col2:
             if intent == "predict":
                 if "last_result" in st.session_state:
                     r = st.session_state["last_result"]
-                    bot_text = KANNADA_TEMPLATES["inference_result"].format(label=r.get("label","N/A"), score=r.get("score",0.0), notes=r.get("notes",""))
+                    bot_text = KANNADA_TEMPLATES["inference_result"].format(
+                        label=r.get("label", "N/A"),
+                        score=r.get("score", 0.0),
+                        notes=r.get("notes", ""),
+                    )
                 else:
                     bot_text = answer_in_kannada(intent)
             elif intent == "accuracy":
-                bot_text = answer_in_kannada(intent, context={"acc":0.92})
+                bot_text = answer_in_kannada(intent, context={"acc": 0.92})
             else:
                 bot_text = answer_in_kannada(intent)
 
@@ -380,6 +470,3 @@ with col2:
             st.markdown(f"*You:* {text}")
         else:
             st.markdown(f"*Bot:* {text}")
-
-
-
