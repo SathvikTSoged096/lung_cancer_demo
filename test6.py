@@ -18,14 +18,17 @@ import numpy as np
 from PIL import Image
 import cv2
 from gtts import gTTS
+import gdown
 
 import tensorflow as tf
 from tensorflow.keras.models import load_model as keras_load_model
 
 # ---------- CONFIG ----------
 # Google Drive direct download link for the model
-MODEL_URL = "https://drive.google.com/uc?export=download&id=1s7c8s4nYH0oBWGBLNb_d_q5Loc0hl4MN"
+MODEL_ID = "1s7c8s4nYH0oBWGBLNb_d_q5Loc0hl4MN"
 MODEL_PATH = "resnet50_lung_cancer.h5"
+MODEL_URL = f"https://drive.google.com/uc?id=1s7c8s4nYH0oBWGBLNb_d_q5Loc0hl4MN"
+
 INPUT_SIZE = (224, 224)
 CLASS_MAP = {0: "Normal", 1: "Benign", 2: "Malignant"}
 # ----------------------------
@@ -45,22 +48,35 @@ except Exception:
 @st.cache_resource(show_spinner=False)
 def load_keras_model(path: str):
     """
-    Downloads the model from Google Drive if not present locally,
-    then loads it with Keras. Cached so it only happens once.
+    Downloads the model from Google Drive via gdown if not present
+    or if the existing file looks too small/corrupted.
+    Then loads it with Keras.
     """
     try:
-        if not os.path.exists(path):
-            # Download model from Google Drive
-            r = requests.get(MODEL_URL, stream=True)
-            r.raise_for_status()
-            with open(path, "wb") as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
+        need_download = True
 
-        model = keras_load_model(path)
+        if os.path.exists(path):
+            # If file exists but is too small (< 5 MB), likely corrupted HTML
+            if os.path.getsize(path) > 5_000_000:
+                need_download = False
+            else:
+                # remove bad file
+                os.remove(path)
+
+        if need_download:
+            # Use gdown - it handles Google Drive confirm tokens for large files
+            gdown.download(MODEL_URL, path, quiet=False)
+
+        model = keras_load_model(path, compile=False)
         return model, f"Loaded model from: {path}"
+
     except Exception as e:
+        # If something goes wrong, clean up so future runs can re-download
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+            except Exception:
+                pass
         return None, f"Error loading model: {e}"
 
 
@@ -470,3 +486,4 @@ with col2:
             st.markdown(f"*You:* {text}")
         else:
             st.markdown(f"*Bot:* {text}")
+
