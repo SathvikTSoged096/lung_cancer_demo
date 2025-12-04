@@ -27,7 +27,7 @@ from tensorflow.keras.models import load_model as keras_load_model
 # Google Drive direct download link for the model
 MODEL_ID = "1s7c8s4nYH0oBWGBLNb_d_q5Loc0hl4MN"
 MODEL_PATH = "resnet50_lung_cancer.h5"
-MODEL_URL = f"https://drive.google.com/uc?id=1s7c8s4nYH0oBWGBLNb_d_q5Loc0hl4MN"
+MODEL_URL = f"https://drive.google.com/uc?id=1QN6jTC-pZYXmazzA-vMcnDksLORKFbUA"
 
 INPUT_SIZE = (224, 224)
 CLASS_MAP = {0: "Normal", 1: "Benign", 2: "Malignant"}
