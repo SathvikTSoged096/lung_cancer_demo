@@ -1,0 +1,15 @@
+credentials:
+  usernames:
+    demo:
+      email: "demo@example.com"
+      name: "Demo User"
+      # password = "password" hashed with bcrypt
+      password: "$2b$12$5a5Qa......PUT_HASH_HERE"
+
+cookie:
+  name: "lung_auth"
+  key: "some_random_secret_key"
+  expiry_days: 1
+
+preauthorized:
+  emails: []
