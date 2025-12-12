@@ -1,18 +1,23 @@
 """
-lung_chatbot_streamlit.py
-Single-file Streamlit demo with robust Grad-CAM visualization.
+Lung cancer Streamlit demo (fixed)
 
-- Upload .jpg CT slices (grayscale) or a .npy CT volume
-- Run inference with a Keras model (resnet50_lung_cancer.h5)
-- Show Grad-CAM overlay + annotated bounding box for a representative slice
-- Kannada chatbot with TTS
+Changes made:
+- Use Google Drive "uc?id" download URL to avoid HTML "view" page being saved.
+- Detect HTML/corrupted downloads and re-download automatically.
+- Use np.load(..., allow_pickle=True) when loading from uploaded .npy BytesIO.
+- Improved error messages and logging for model load/Grad-CAM.
+- Minor robustness fixes.
+
+Place this file and (optionally) logo2.png in the same folder and run with:
+    streamlit run lung_chatbot_streamlit.py
+
+This is still a demo prototype and NOT a medical tool.
 """
 
 import os
 import io
 import tempfile
 import traceback
-import requests
 import streamlit as st
 import numpy as np
 from PIL import Image
@@ -24,10 +29,10 @@ import tensorflow as tf
 from tensorflow.keras.models import load_model as keras_load_model
 
 # ---------- CONFIG ----------
-# Google Drive direct download link for the model
 MODEL_ID = "1QN6jTC-pZYXmazzA-vMcnDksLORKFbUA"
+# Use the 'uc?id=' endpoint which returns the raw file rather than the "view" HTML page
+MODEL_URL = f"https://drive.google.com/uc?id={MODEL_ID}&export=download"
 MODEL_PATH = "resnet50_lung_cancer.h5"
-MODEL_URL = f"https://drive.google.com/file/d/1QN6jTC-pZYXmazzA-vMcnDksLORKFbUA/view?usp=drive_link"
 
 INPUT_SIZE = (224, 224)
 CLASS_MAP = {0: "Normal", 1: "Benign", 2: "Malignant"}
@@ -40,51 +45,85 @@ try:
     logo = Image.open("logo2.png")
     st.image(logo, width=150)
 except Exception:
-    # If logo not found, just skip without crashing
     pass
 
 
-# --- Model loader (cached, with download from Drive) ---
-@st.cache_resource(show_spinner=False)
+def _looks_like_html(path: str) -> bool:
+    """Quick heuristic to detect if a downloaded file is actually an HTML "view" page."""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(1024).lower()
+            return b"<!doctype html" in head or b"<html" in head or b"content-type: text/html" in head
+    except Exception:
+        return False
+
+
+@st.cache_resource
 def load_keras_model(path: str):
     """
-    Downloads the model from Google Drive via gdown if not present
-    or if the existing file looks too small/corrupted.
-    Then loads it with Keras.
+    Downloads the model from Google Drive via gdown if not present or if corrupted,
+    then loads it with Keras. Returns (model_or_none, message_str).
     """
     try:
         need_download = True
 
+        # If file exists and looks OK, skip download
         if os.path.exists(path):
-            # If file exists but is too small (< 5 MB), likely corrupted HTML
-            if os.path.getsize(path) > 5_000_000:
+            try:
+                size = os.path.getsize(path)
+            except Exception:
+                size = 0
+            # sanity size check (5 MB)
+            if size > 5_000_000 and not _looks_like_html(path):
                 need_download = False
             else:
-                # remove bad file
-                os.remove(path)
+                try:
+                    os.remove(path)
+                except Exception:
+                    pass
 
         if need_download:
-            # Use gdown - it handles Google Drive confirm tokens for large files
+            # gdown handles "confirm" tokens for large files. fuzzy=True can help with different URL formats.
+            st.info("Downloading model from Google Drive...")
+            # attempt download
             gdown.download(MODEL_URL, path, quiet=False)
 
+            # if the downloaded file looks like HTML (Google Drive returned the view page), remove and fail
+            if not os.path.exists(path) or _looks_like_html(path) or os.path.getsize(path) < 5_000_000:
+                # cleanup
+                try:
+                    if os.path.exists(path):
+                        os.remove(path)
+                except Exception:
+                    pass
+                return None, (
+                    "Failed to download a valid model file. "
+                    "Google Drive sometimes returns an HTML page if the link isn't a direct download. "
+                    "Check the MODEL_ID, make the file shared publicly and try again."
+                )
+
+        # Finally attempt to load the model
         model = keras_load_model(path, compile=False)
         return model, f"Loaded model from: {path}"
 
     except Exception as e:
-        # If something goes wrong, clean up so future runs can re-download
-        if os.path.exists(path):
-            try:
+        # cleanup on error so retry will attempt re-download
+        try:
+            if os.path.exists(path):
                 os.remove(path)
-            except Exception:
-                pass
-        return None, f"Error loading model: {e}"
+        except Exception:
+            pass
+        tb = traceback.format_exc()
+        return None, f"Error loading model: {e}\n{tb}"
 
 
 # --- Preprocess helpers ---
+
 def preprocess_slice(slice_img, target_size=INPUT_SIZE):
     img = slice_img.astype(np.float32)
     if img.ndim == 2:
         img = np.stack([img, img, img], axis=-1)
+    # cv2.resize expects (width, height)
     img = cv2.resize(img, target_size)
     img = img / 255.0
     return img.astype(np.float32)
@@ -93,7 +132,7 @@ def preprocess_slice(slice_img, target_size=INPUT_SIZE):
 # --- Find last conv layer robustly ---
 def find_last_conv_layer(model):
     for layer in reversed(model.layers):
-        name = layer.name.lower()
+        name = getattr(layer, "name", "").lower()
         if 'conv' in name:
             return layer.name
         if layer.__class__.__name__.lower().startswith('conv'):
@@ -103,13 +142,6 @@ def find_last_conv_layer(model):
 
 # --- Grad-CAM helper (robust to multi-output models) ---
 def make_gradcam_heatmap(img_array, model, pred_index=None, last_conv_layer_name=None):
-    """
-    img_array: (1,H,W,3) preprocessed input
-    model: keras model
-    pred_index: class index to compute gradients for (if None, use top predicted)
-    last_conv_layer_name: optional layer name; if None, will auto-detect
-    Returns: heatmap (H_raw, W_raw) normalized 0..1 (numpy float32)
-    """
     if last_conv_layer_name is None:
         last_conv_layer_name = find_last_conv_layer(model)
 
@@ -121,11 +153,9 @@ def make_gradcam_heatmap(img_array, model, pred_index=None, last_conv_layer_name
     with tf.GradientTape() as tape:
         conv_outputs, predictions = grad_model(img_array)
 
-        # If model.output is list/tuple, pick the first output (adjust if necessary)
         if isinstance(predictions, (list, tuple)):
             predictions = predictions[0]
 
-        # Ensure tensor
         predictions = tf.convert_to_tensor(predictions)
 
         if pred_index is None:
@@ -137,7 +167,6 @@ def make_gradcam_heatmap(img_array, model, pred_index=None, last_conv_layer_name
     pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
 
     conv_outputs = conv_outputs[0]
-
     weighted = conv_outputs * pooled_grads[tf.newaxis, tf.newaxis, :]
     heatmap = tf.reduce_sum(weighted, axis=-1)
 
@@ -151,7 +180,6 @@ def make_gradcam_heatmap(img_array, model, pred_index=None, last_conv_layer_name
 
 # --- Overlay helper ---
 def overlay_heatmap_on_image(orig_rgb, heatmap, thresh=0.35):
-    # orig_rgb: uint8 RGB
     if orig_rgb.dtype != np.uint8:
         orig = (255 * (orig_rgb - orig_rgb.min()) / (orig_rgb.ptp() + 1e-8)).astype(np.uint8)
     else:
@@ -159,7 +187,7 @@ def overlay_heatmap_on_image(orig_rgb, heatmap, thresh=0.35):
 
     hmap_u8 = (heatmap * 255).astype(np.uint8)
     hmap_resized = cv2.resize(hmap_u8, (orig.shape[1], orig.shape[0]))
-    heatmap_color = cv2.applyColorMap(hmap_resized, cv2.COLORMAP_JET)  # BGR
+    heatmap_color = cv2.applyColorMap(hmap_resized, cv2.COLORMAP_JET)
     overlay_bgr = cv2.addWeighted(cv2.cvtColor(orig, cv2.COLOR_RGB2BGR), 0.6, heatmap_color, 0.4, 0)
     overlay_rgb = cv2.cvtColor(overlay_bgr, cv2.COLOR_BGR2RGB)
 
@@ -204,7 +232,9 @@ def run_inference_with_gradcam(model, volume_array, return_gradcam=True):
                 rgb = np.stack([sl, sl, sl], axis=-1)
             else:
                 rgb = sl
-            rgb_resized = cv2.resize(rgb.astype(np.uint8), INPUT_SIZE)
+            # convert to uint8 for visualization
+            rgb_vis = np.clip(rgb, 0, 255).astype(np.uint8)
+            rgb_resized = cv2.resize(rgb_vis, INPUT_SIZE)
             orig_resized.append(rgb_resized)
             x = preprocess_slice(sl, target_size=INPUT_SIZE)
             preproc_list.append(x)
@@ -212,7 +242,6 @@ def run_inference_with_gradcam(model, volume_array, return_gradcam=True):
         X = np.stack(preproc_list, axis=0).astype(np.float32)
 
         preds = model.predict(X, batch_size=16)
-        # coalesce list outputs
         if isinstance(preds, (list, tuple)):
             preds = preds[0]
         preds = np.asarray(preds)
@@ -224,7 +253,7 @@ def run_inference_with_gradcam(model, volume_array, return_gradcam=True):
                 "trace": None,
                 "gradcam": None
             }
-        # apply softmax if needed
+
         row_sums = preds.sum(axis=1)
         if not np.allclose(row_sums, 1.0, atol=1e-3):
             preds = tf.nn.softmax(preds, axis=-1).numpy()
@@ -330,7 +359,7 @@ def answer_in_kannada(intent, context=None):
     if intent == "thanks":
         return KANNADA_TEMPLATES["thanks"]
     if intent == "predict":
-        return "ದಯವಿಟ್ಟು JPG ಸ್ಲೈಸುಗಳನ್ನು ಅಥವಾ .npy ಫೈಲ್ ಅನ್ನು ಅಪ್‌ಲೋಡ್ ಮಾಡಿ ಮತ್ತು 'Run Inference' ಒತ್ತಿ."
+        return "ದಯವಿಟ್ಟು JPG ಸ್ಲೈಸುಗಳನ್ನು ಅಥವಾ .npy ಫೈಲ್ ಅನ್ನು ಅಪ್\u200cಲೋಡ್ ಮಾಡಿ ಮತ್ತು 'Run Inference' ಒತ್ತಿ."
     return "ಕ್ಷಮಿಸಿ, ನನಗೆ ಅರ್ಥವಾಗಲಿಲ್ಲ."
 
 
@@ -355,7 +384,6 @@ col1, col2 = st.columns([1, 1])
 with col1:
     st.header("Model / Inference")
 
-    # Load (and if needed, download) model with spinner
     with st.spinner("Loading model (first time may take a while)..."):
         model, model_msg = load_keras_model(MODEL_PATH)
 
@@ -376,9 +404,13 @@ with col1:
         jpg_files = [f for f in uploaded_files if f.name.lower().endswith(('.jpg', '.jpeg'))]
 
         if len(npy_files) == 1 and len(uploaded_files) == 1:
-            arr = np.load(io.BytesIO(npy_files[0].read()))
-            st.write("Loaded .npy volume shape:", arr.shape)
-            st.session_state["last_volume"] = arr
+            # read .npy from uploaded file bytes
+            try:
+                arr = np.load(io.BytesIO(npy_files[0].read()), allow_pickle=True)
+                st.write("Loaded .npy volume shape:", arr.shape)
+                st.session_state["last_volume"] = arr
+            except Exception as e:
+                st.error("Failed to load .npy: " + str(e))
         elif len(jpg_files) >= 1:
             jpg_files = sorted(jpg_files, key=lambda x: x.name)
             imgs = []
@@ -485,4 +517,4 @@ with col2:
         if speaker == "user":
             st.markdown(f"*You:* {text}")
         else:
-            st.markdown(f"*Bot:* {text}")   
+            st.markdown(f"*Bot:* {text}")
