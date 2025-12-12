@@ -28,9 +28,22 @@ INPUT_SIZE = (224, 224)
 CLASS_MAP = {0: "Normal", 1: "Benign", 2: "Malignant"}
 # ----------------------------
 
-st.set_page_config(page_title="Lung Cancer Demo Chatbot (Kannada)", layout="wide")
-logo = Image.open(r"C:\Users\UDAY\Documents\majorProject\anotherProject\logo2.png")
-st.image(logo, width=150) 
+logo = None
+for candidate in ["generated-image(11).png", "assets/imagel.png", "logo2.png", "assets/logo2.png", "logo.png", "assets/logo.png"]:
+    try:
+        if os.path.exists(candidate):
+            logo = Image.open(candidate)
+            break
+    except Exception:
+        logo = None
+        break
+
+if logo is not None:
+    try:
+        st.image(logo, width=150)
+    except Exception:
+        pass
+
 # --- Model loader (cached) ---
 @st.cache_resource(show_spinner=False)
 def load_keras_model(path):
@@ -379,5 +392,6 @@ with col2:
             st.markdown(f"*You:* {text}")
         else:
             st.markdown(f"*Bot:* {text}")
+
 
 
