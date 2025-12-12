@@ -1,220 +1,86 @@
 """
 lung_chatbot_streamlit.py
-Single-file Streamlit demo with robust Grad-CAM visualization + Google Drive model fetch.
+Single-file Streamlit demo with robust Grad-CAM visualization.
 
-- Downloads model from Google Drive if not present locally.
-- Verifies HDF5 signature before attempting to load.
-- Shows download progress in UI.
-- Keeps original features: upload .jpg/.npy, inference, Grad-CAM, Kannada chatbot + TTS.
+- Upload .jpg CT slices (grayscale) or a .npy CT volume
+- Run inference with a Keras model (resnet50_lung_cancer.h5)
+- Show Grad-CAM overlay + annotated bounding box for a representative slice
+- Kannada chatbot with TTS
 """
 
 import os
 import io
-import re
-import time
-import stat
 import tempfile
 import traceback
 import requests
-
 import streamlit as st
 import numpy as np
 from PIL import Image
 import cv2
 from gtts import gTTS
+import gdown
 
 import tensorflow as tf
 from tensorflow.keras.models import load_model as keras_load_model
 
 # ---------- CONFIG ----------
-MODEL_PATH = r"resnet50_lung_cancer.h5"  # local target path (change if you want)
+# Google Drive direct download link for the model
+MODEL_ID = "1QN6jTC-pZYXmazzA-vMcnDksLORKFbUA"
+MODEL_PATH = "resnet50_lung_cancer.h5"
+MODEL_URL = f"https://drive.google.com/file/d/1QN6jTC-pZYXmazzA-vMcnDksLORKFbUA/view?usp=drive_link"
+
 INPUT_SIZE = (224, 224)
 CLASS_MAP = {0: "Normal", 1: "Benign", 2: "Malignant"}
-
-# Google Drive file id for the .h5 model (replace with yours if needed)
-GOOGLE_DRIVE_ID = "1QN6jTC-pZYXmazzA-vMcnDksLORKFbUA"
-DRIVE_BASE_URL = "https://drive.google.com/uc?export=download&id="
 # ----------------------------
 
-# ----------------- Utilities for downloading and verifying -----------------
-def _extract_confirm_token_from_html(html_text: str):
-    patterns = [
-        r'confirm=([0-9A-Za-z_-]+)&amp;id=',
-        r'confirm=([0-9A-Za-z_-]+)&',
-        r'download_warning[0-9]+=([0-9A-Za-z_-]+)',
-        r'confirm=([0-9A-Za-z_-]+)\"',
-        r'name="confirm" value="([0-9A-Za-z_-]+)"'
-    ]
-    for p in patterns:
-        m = re.search(p, html_text)
-        if m:
-            return m.group(1)
-    return None
+st.set_page_config(page_title="Lung Cancer Demo Chatbot (Kannada)", layout="wide")
 
-def _looks_like_hdf5(path):
-    try:
-        with open(path, "rb") as f:
-            sig = f.read(8)
-        return sig == b'\x89HDF\r\n\x1a\n'
-    except Exception:
-        return False
+# Try loading logo from local file (place logo2.png in the same folder as this script)
+try:
+    logo = Image.open("logo2.png")
+    st.image(logo, width=150)
+except Exception:
+    # If logo not found, just skip without crashing
+    pass
 
-def download_from_google_drive_strict(file_id: str, out_path: str, progress_cb=None, timeout=30):
-    """
-    Robustly download a file from Google Drive, handling confirm tokens for large files.
-    Verifies file size and HDF5 signature; returns (out_path, None) on success or (None, error_message).
-    progress_cb(percent_int) optional callback for progress updates.
-    """
-    url = DRIVE_BASE_URL + file_id
-    session = requests.Session()
 
-    try:
-        resp = session.get(url, stream=True, timeout=timeout)
-    except Exception as e:
-        return None, f"Initial request failed: {e}"
-
-    # read a small prefix to check if HTML returned
-    start = b""
-    try:
-        # resp.raw is available when stream=True
-        start = resp.raw.read(2048)
-    except Exception:
-        start = resp.content[:2048]
-
-    text_start = ""
-    try:
-        text_start = start.decode("utf-8", errors="ignore")
-    except Exception:
-        text_start = ""
-
-    # token from cookies
-    token = None
-    for k, v in resp.cookies.items():
-        if k.startswith("download_warning"):
-            token = v
-            break
-
-    if token is None:
-        token = _extract_confirm_token_from_html(text_start)
-
-    if token:
-        try:
-            resp = session.get(url + "&confirm=" + token, stream=True, timeout=timeout)
-        except Exception as e:
-            return None, f"Request with confirm token failed: {e}"
-
-    # Save to temp .part file while tracking progress
-    tmp = out_path + ".part"
-    try:
-        total = resp.headers.get("Content-Length")
-        total = int(total) if total is not None else None
-        chunk_size = 32768
-        downloaded = 0
-        with open(tmp, "wb") as f:
-            for chunk in resp.iter_content(chunk_size):
-                if chunk:
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    if progress_cb and total:
-                        pct = int(downloaded * 100 / total)
-                        progress_cb(min(pct, 100))
-    except Exception as e:
-        try:
-            if os.path.exists(tmp):
-                os.remove(tmp)
-        except Exception:
-            pass
-        return None, f"Failed while writing file: {e}"
-
-    # sanity size check
-    try:
-        size = os.path.getsize(tmp)
-    except Exception:
-        size = 0
-
-    if size < 1024:
-        # read content for debug
-        try:
-            with open(tmp, "rb") as f:
-                sample = f.read(4096).decode("utf-8", errors="ignore")
-        except Exception:
-            sample = "<couldn't read partial file>"
-        try:
-            os.remove(tmp)
-        except Exception:
-            pass
-        return None, f"Downloaded file too small ({size} bytes). Likely an HTML page. Leading content:\n\n{sample[:1000]}"
-
-    # move into place
-    try:
-        os.replace(tmp, out_path)
-    except Exception as e:
-        return None, f"Failed to rename temp file: {e}"
-
-    # chmod
-    try:
-        os.chmod(out_path, stat.S_IREAD | stat.S_IWRITE)
-    except Exception:
-        pass
-
-    # verify HDF5 signature
-    if not _looks_like_hdf5(out_path):
-        try:
-            with open(out_path, "rb") as f:
-                sample = f.read(2048).decode("utf-8", errors="ignore")
-        except Exception:
-            sample = "<couldn't read file for debug>"
-        # keep file (user may want to inspect), but report error
-        return None, ("Downloaded file does not start with HDF5 signature. "
-                      f"File size: {size} bytes. Leading content (first 1000 chars):\n\n{sample[:1000]}\n\n"
-                      "This usually means Google Drive returned an HTML page (permission/preview) or the file is corrupted. "
-                      "Ensure the Drive file is the binary .h5 and 'Anyone with the link' is enabled.")
-    return out_path, None
-
-# ---------- Model presence & load flow ----------
-def ensure_model_present_ui(file_id: str, target_path: str):
-    """
-    Ensures model exists locally. If missing, downloads with progress and returns (True, message) or (False, error).
-    This function interacts with Streamlit UI (progress bar / info messages).
-    """
-    if os.path.exists(target_path):
-        return True, f"Model already exists at: {target_path}"
-
-    st.info("Model not found locally. Attempting download from Google Drive...")
-    progress = st.progress(0)
-    status_text = st.empty()
-
-    def progress_cb(pct):
-        try:
-            progress.progress(pct)
-            status_text.info(f"Downloading model: {pct}%")
-        except Exception:
-            pass
-
-    out, err = download_from_google_drive_strict(file_id, target_path, progress_cb=progress_cb)
-    if err:
-        progress.empty()
-        status_text.error("Download failed.")
-        return False, err
-    progress.progress(100)
-    status_text.success("Download complete.")
-    return True, f"Downloaded model to {out}"
-
+# --- Model loader (cached, with download from Drive) ---
 @st.cache_resource(show_spinner=False)
-def load_keras_model_cached(path):
+def load_keras_model(path: str):
     """
-    Load the Keras model from disk (cached to avoid reloading repeatedly).
-    Return (model_or_none, message)
+    Downloads the model from Google Drive via gdown if not present
+    or if the existing file looks too small/corrupted.
+    Then loads it with Keras.
     """
-    if not os.path.exists(path):
-        return None, f"Model not found at: {path}"
     try:
-        model = keras_load_model(path)
+        need_download = True
+
+        if os.path.exists(path):
+            # If file exists but is too small (< 5 MB), likely corrupted HTML
+            if os.path.getsize(path) > 5_000_000:
+                need_download = False
+            else:
+                # remove bad file
+                os.remove(path)
+
+        if need_download:
+            # Use gdown - it handles Google Drive confirm tokens for large files
+            gdown.download(MODEL_URL, path, quiet=False)
+
+        model = keras_load_model(path, compile=False)
         return model, f"Loaded model from: {path}"
+
     except Exception as e:
+        # If something goes wrong, clean up so future runs can re-download
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+            except Exception:
+                pass
         return None, f"Error loading model: {e}"
 
-# ----------------- Preprocessing, GradCAM, overlay, inference (unchanged) -----------------
+
+# --- Preprocess helpers ---
 def preprocess_slice(slice_img, target_size=INPUT_SIZE):
     img = slice_img.astype(np.float32)
     if img.ndim == 2:
@@ -223,6 +89,8 @@ def preprocess_slice(slice_img, target_size=INPUT_SIZE):
     img = img / 255.0
     return img.astype(np.float32)
 
+
+# --- Find last conv layer robustly ---
 def find_last_conv_layer(model):
     for layer in reversed(model.layers):
         name = layer.name.lower()
@@ -232,25 +100,47 @@ def find_last_conv_layer(model):
             return layer.name
     raise ValueError("No convolutional layer found in model to compute Grad-CAM.")
 
+
+# --- Grad-CAM helper (robust to multi-output models) ---
 def make_gradcam_heatmap(img_array, model, pred_index=None, last_conv_layer_name=None):
+    """
+    img_array: (1,H,W,3) preprocessed input
+    model: keras model
+    pred_index: class index to compute gradients for (if None, use top predicted)
+    last_conv_layer_name: optional layer name; if None, will auto-detect
+    Returns: heatmap (H_raw, W_raw) normalized 0..1 (numpy float32)
+    """
     if last_conv_layer_name is None:
         last_conv_layer_name = find_last_conv_layer(model)
 
-    grad_model = tf.keras.models.Model([model.inputs], [model.get_layer(last_conv_layer_name).output, model.output])
+    grad_model = tf.keras.models.Model(
+        [model.inputs],
+        [model.get_layer(last_conv_layer_name).output, model.output]
+    )
+
     with tf.GradientTape() as tape:
         conv_outputs, predictions = grad_model(img_array)
+
+        # If model.output is list/tuple, pick the first output (adjust if necessary)
         if isinstance(predictions, (list, tuple)):
             predictions = predictions[0]
+
+        # Ensure tensor
         predictions = tf.convert_to_tensor(predictions)
+
         if pred_index is None:
             pred_index = tf.argmax(predictions[0])
+
         loss = predictions[:, pred_index]
 
     grads = tape.gradient(loss, conv_outputs)
     pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
+
     conv_outputs = conv_outputs[0]
+
     weighted = conv_outputs * pooled_grads[tf.newaxis, tf.newaxis, :]
     heatmap = tf.reduce_sum(weighted, axis=-1)
+
     heatmap = np.maximum(heatmap, 0)
     max_val = tf.reduce_max(heatmap)
     if max_val == 0:
@@ -258,7 +148,10 @@ def make_gradcam_heatmap(img_array, model, pred_index=None, last_conv_layer_name
     heatmap /= max_val
     return heatmap.numpy().astype(np.float32)
 
+
+# --- Overlay helper ---
 def overlay_heatmap_on_image(orig_rgb, heatmap, thresh=0.35):
+    # orig_rgb: uint8 RGB
     if orig_rgb.dtype != np.uint8:
         orig = (255 * (orig_rgb - orig_rgb.min()) / (orig_rgb.ptp() + 1e-8)).astype(np.uint8)
     else:
@@ -266,7 +159,7 @@ def overlay_heatmap_on_image(orig_rgb, heatmap, thresh=0.35):
 
     hmap_u8 = (heatmap * 255).astype(np.uint8)
     hmap_resized = cv2.resize(hmap_u8, (orig.shape[1], orig.shape[0]))
-    heatmap_color = cv2.applyColorMap(hmap_resized, cv2.COLORMAP_JET)
+    heatmap_color = cv2.applyColorMap(hmap_resized, cv2.COLORMAP_JET)  # BGR
     overlay_bgr = cv2.addWeighted(cv2.cvtColor(orig, cv2.COLOR_RGB2BGR), 0.6, heatmap_color, 0.4, 0)
     overlay_rgb = cv2.cvtColor(overlay_bgr, cv2.COLOR_BGR2RGB)
 
@@ -282,13 +175,21 @@ def overlay_heatmap_on_image(orig_rgb, heatmap, thresh=0.35):
 
     return overlay_rgb, annotated_rgb
 
+
+# --- Robust predict handling + Grad-CAM pipeline ---
 def run_inference_with_gradcam(model, volume_array, return_gradcam=True):
     try:
         if model is None:
             mean_val = float(np.nanmean(volume_array))
-            score = 1.0 / (1.0 + np.exp(-0.01*(mean_val-100)))
+            score = 1.0 / (1.0 + np.exp(-0.01 * (mean_val - 100)))
             label = "ಸ್ಥೂಲ ಸಂಶಯ (Malignant)" if score > 0.5 else "ಸಂದೇಹದಿಲ್ಲ (Benign)"
-            return {"label": label, "score": float(score), "probs": None, "notes": "Demo inference; replace with real model.", "gradcam": None}
+            return {
+                "label": label,
+                "score": float(score),
+                "probs": None,
+                "notes": "Demo inference; replace with real model.",
+                "gradcam": None
+            }
 
         arr = np.squeeze(volume_array)
         if arr.ndim == 2:
@@ -311,13 +212,19 @@ def run_inference_with_gradcam(model, volume_array, return_gradcam=True):
         X = np.stack(preproc_list, axis=0).astype(np.float32)
 
         preds = model.predict(X, batch_size=16)
+        # coalesce list outputs
         if isinstance(preds, (list, tuple)):
             preds = preds[0]
         preds = np.asarray(preds)
         if preds.ndim == 1:
             preds = np.expand_dims(preds, axis=0)
         if preds.ndim != 2:
-            return {"error": f"Unexpected prediction shape: {preds.shape}", "trace": None, "gradcam": None}
+            return {
+                "error": f"Unexpected prediction shape: {preds.shape}",
+                "trace": None,
+                "gradcam": None
+            }
+        # apply softmax if needed
         row_sums = preds.sum(axis=1)
         if not np.allclose(row_sums, 1.0, atol=1e-3):
             preds = tf.nn.softmax(preds, axis=-1).numpy()
@@ -328,7 +235,11 @@ def run_inference_with_gradcam(model, volume_array, return_gradcam=True):
         score = float(mean_probs[class_idx])
 
         label_en = CLASS_MAP.get(class_idx, f"class_{class_idx}")
-        kn_map = {"Normal": "ಸಾಮಾನ್ಯ (Normal)", "Benign": "ಸಂದೇಹವಿಲ್ಲ (Benign)", "Malignant": "ಸ್ಥೂಲ ಸಂಶಯ (Malignant)"}
+        kn_map = {
+            "Normal": "ಸಾಮಾನ್ಯ (Normal)",
+            "Benign": "ಸಂದೇಹವಿಲ್ಲ (Benign)",
+            "Malignant": "ಸ್ಥೂಲ ಸಂಶಯ (Malignant)"
+        }
         label_kn = kn_map.get(label_en, label_en)
 
         gradcam_info = None
@@ -345,22 +256,42 @@ def run_inference_with_gradcam(model, volume_array, return_gradcam=True):
                 except Exception as e:
                     st.info(f"Last conv detection: {e}")
                     last_conv = None
-                heatmap = make_gradcam_heatmap(single_input, model, pred_index=class_idx, last_conv_layer_name=last_conv)
+                heatmap = make_gradcam_heatmap(
+                    single_input,
+                    model,
+                    pred_index=class_idx,
+                    last_conv_layer_name=last_conv
+                )
                 if heatmap is None or heatmap.size == 0:
                     raise RuntimeError("Heatmap empty")
-                overlay_rgb, annotated_rgb = overlay_heatmap_on_image(orig_resized[rep_idx], heatmap, thresh=0.35)
-                gradcam_info = {"slice_index": rep_idx, "overlay_rgb": overlay_rgb, "annotated_rgb": annotated_rgb}
+                overlay_rgb, annotated_rgb = overlay_heatmap_on_image(
+                    orig_resized[rep_idx],
+                    heatmap,
+                    thresh=0.35
+                )
+                gradcam_info = {
+                    "slice_index": rep_idx,
+                    "overlay_rgb": overlay_rgb,
+                    "annotated_rgb": annotated_rgb
+                }
             except Exception as e:
                 gradcam_info = {"error": str(e), "trace": traceback.format_exc()}
 
-        return {"label": label_kn, "score": score, "probs": mean_probs.tolist(), "notes": "Model-based inference (mean over slices).", "gradcam": gradcam_info}
+        return {
+            "label": label_kn,
+            "score": score,
+            "probs": mean_probs.tolist(),
+            "notes": "Model-based inference (mean over slices).",
+            "gradcam": gradcam_info
+        }
 
     except Exception as e:
         return {"error": str(e), "trace": traceback.format_exc(), "gradcam": None}
 
-# ----------------- Kannada chatbot / TTS -----------------
+
+# --- Kannada response templates & NLU ---
 KANNADA_TEMPLATES = {
-    "greeting": "ನಮಸ್ತೆ! 나는 ನಿಮ್ಮ ಲಂಗ್-ಕ್ಯಾನ್ಸರ್ ಪ್ರೋಟೋಟೈಪ್ ಚಾಟ್‌ಬಾಟ್. ನಿಮಗೆ ಹೇಗೆ ಸಹಾಯ ಮಾಡಬಹುದು?",
+    "greeting": "ನಮಸ್ತೆ! ನಾನು ನಿಮ್ಮ ಲಂಗ್-ಕ್ಯಾನ್ಸರ್ ಪ್ರೋಟೋಟೈಪ್ ಚಾಟ್‌ಬಾಟ್. ನಿಮಗೆ ಹೇಗೆ ಸಹಾಯ ಮಾಡಬಹುದು?",
     "inference_result": "ಮೌಲ್ಯಮಾಪನ ಫಲಿತಾಂಶ:\n\nಫಲಿತಾಂಶ: {label}\nconfidence (ಸ್ಕೋರ್): {score:.3f}\nನೋಟ್: {notes}",
     "explain_how": "ಈ ಮಾಡೆಲ್ 3D CT ವಾಲ್ಯೂಮ್ ಗಳನ್ನು ಒಳಗೆ ತೆಗೆದುಕೊಂಡು ಕಂಡುಬರುವ ಗುಣಲಕ್ಷಣಗಳನ್ನು ಆಧರಿಸಿ ಅನುಮಾನಿತ ತಂತು/ನೋಡ್ ಗಳನ್ನು ಗುರುತಿಸುತ್ತದೆ.",
     "accuracy": "ಮಾಡೆಲ್‌ಗಾಗಿ ಉದಾಹರಣೆ accuracy = {acc:.2f}.",
@@ -368,21 +299,23 @@ KANNADA_TEMPLATES = {
     "thanks": "ಧನ್ಯವಾದಗಳು!"
 }
 
+
 def detect_intent(user_text):
     t = user_text.strip().lower()
-    if any(x in t for x in ["hello","hi","namaste","ನಮಸ್ತೆ","ಹಲೋ","hey"]):
+    if any(x in t for x in ["hello", "hi", "namaste", "ನಮಸ್ತೆ", "ಹಲೋ", "hey"]):
         return "greeting"
-    if any(x in t for x in ["predict","inference","run inference","result","ಫಲ","ಫಲಿತಾಂಶ"]):
+    if any(x in t for x in ["predict", "inference", "run inference", "result", "ಫಲ", "ಫಲಿತಾಂಶ"]):
         return "predict"
-    if any(x in t for x in ["how","work","ಹೇಗೆ","ಮಾಡುತ್ತದೆ","explain","ವಿವರಣೆ"]):
+    if any(x in t for x in ["how", "work", "ಹೇಗೆ", "ಮಾಡುತ್ತದೆ", "explain", "ವಿವರಣೆ"]):
         return "explain"
-    if any(x in t for x in ["accuracy","precision","sensitivity","acc"]):
+    if any(x in t for x in ["accuracy", "precision", "sensitivity", "acc"]):
         return "accuracy"
-    if any(x in t for x in ["limitations","limits","ಸೀಮಿತತೆ"]):
+    if any(x in t for x in ["limitations", "limits", "ಸೀಮಿತತೆ"]):
         return "limitations"
-    if any(x in t for x in ["thanks","thank","ಧನ್ಯ","bye"]):
+    if any(x in t for x in ["thanks", "thank", "ಧನ್ಯ", "bye"]):
         return "thanks"
     return "unknown"
+
 
 def answer_in_kannada(intent, context=None):
     if intent == "greeting":
@@ -400,6 +333,8 @@ def answer_in_kannada(intent, context=None):
         return "ದಯವಿಟ್ಟು JPG ಸ್ಲೈಸುಗಳನ್ನು ಅಥವಾ .npy ಫೈಲ್ ಅನ್ನು ಅಪ್‌ಲೋಡ್ ಮಾಡಿ ಮತ್ತು 'Run Inference' ಒತ್ತಿ."
     return "ಕ್ಷಮಿಸಿ, ನನಗೆ ಅರ್ಥವಾಗಲಿಲ್ಲ."
 
+
+# --- TTS helper ---
 def tts_kannada(text):
     try:
         tts = gTTS(text=text, lang='kn')
@@ -410,7 +345,8 @@ def tts_kannada(text):
         st.error("TTS error: " + str(e))
         return None
 
-# ----------------- Streamlit UI -----------------
+
+# --- Streamlit UI ---
 st.title("Lung Cancer Detector")
 st.markdown("*DISCLAIMER:* This is a demo prototype. Not a medical diagnosis tool.")
 
@@ -419,28 +355,25 @@ col1, col2 = st.columns([1, 1])
 with col1:
     st.header("Model / Inference")
 
-    # Ensure model is present (downloads if missing)
-    ok, msg = ensure_model_present_ui(GOOGLE_DRIVE_ID, MODEL_PATH)
-    if not ok:
-        st.error("Model download/verification failed:")
-        st.code(msg)
-        st.info("Make sure the Drive file is the binary .h5 and sharing is set to 'Anyone with the link → Viewer'.")
-        model = None
-    else:
-        st.success(msg)
-        model, load_msg = load_keras_model_cached(MODEL_PATH)
-        if model is None:
-            st.error("Failed to load model:")
-            st.code(load_msg)
-        else:
-            st.success(load_msg)
+    # Load (and if needed, download) model with spinner
+    with st.spinner("Loading model (first time may take a while)..."):
+        model, model_msg = load_keras_model(MODEL_PATH)
 
-    uploaded_files = st.file_uploader("Upload CT scan slices (.jpg) or a single .npy", type=["jpg","jpeg","npy"], accept_multiple_files=True)
+    if model is not None:
+        st.success(model_msg)
+    else:
+        st.info(model_msg)
+
+    uploaded_files = st.file_uploader(
+        "Upload CT scan slices (.jpg) or a single .npy",
+        type=["jpg", "jpeg", "npy"],
+        accept_multiple_files=True
+    )
     arr = None
 
     if uploaded_files:
         npy_files = [f for f in uploaded_files if f.name.lower().endswith('.npy')]
-        jpg_files = [f for f in uploaded_files if f.name.lower().endswith(('.jpg','.jpeg'))]
+        jpg_files = [f for f in uploaded_files if f.name.lower().endswith(('.jpg', '.jpeg'))]
 
         if len(npy_files) == 1 and len(uploaded_files) == 1:
             arr = np.load(io.BytesIO(npy_files[0].read()))
@@ -471,7 +404,11 @@ with col1:
                     if result.get("trace"):
                         st.text(result.get("trace"))
                 else:
-                    out_text = KANNADA_TEMPLATES["inference_result"].format(label=result.get("label","N/A"), score=result.get("score",0.0), notes=result.get("notes",""))
+                    out_text = KANNADA_TEMPLATES["inference_result"].format(
+                        label=result.get("label", "N/A"),
+                        score=result.get("score", 0.0),
+                        notes=result.get("notes", "")
+                    )
                     st.markdown("### ಫಲಿತಾಂಶ (Kannada)")
                     st.code(out_text)
 
@@ -494,9 +431,17 @@ with col1:
                         st.markdown(f"**Representative slice index:** {rep_idx}")
                         c1, c2 = st.columns(2)
                         with c1:
-                            st.image(gc["annotated_rgb"], caption="Original slice with bounding box (red)", use_container_width=True)
+                            st.image(
+                                gc["annotated_rgb"],
+                                caption="Original slice with bounding box (red)",
+                                use_container_width=True,
+                            )
                         with c2:
-                            st.image(gc["overlay_rgb"], caption="Grad-CAM overlay (heatmap)", use_container_width=True)
+                            st.image(
+                                gc["overlay_rgb"],
+                                caption="Grad-CAM overlay (heatmap)",
+                                use_container_width=True,
+                            )
                     else:
                         st.info("Grad-CAM: unexpected format; see logs.")
 
@@ -518,11 +463,15 @@ with col2:
             if intent == "predict":
                 if "last_result" in st.session_state:
                     r = st.session_state["last_result"]
-                    bot_text = KANNADA_TEMPLATES["inference_result"].format(label=r.get("label","N/A"), score=r.get("score",0.0), notes=r.get("notes",""))
+                    bot_text = KANNADA_TEMPLATES["inference_result"].format(
+                        label=r.get("label", "N/A"),
+                        score=r.get("score", 0.0),
+                        notes=r.get("notes", ""),
+                    )
                 else:
                     bot_text = answer_in_kannada(intent)
             elif intent == "accuracy":
-                bot_text = answer_in_kannada(intent, context={"acc":0.92})
+                bot_text = answer_in_kannada(intent, context={"acc": 0.92})
             else:
                 bot_text = answer_in_kannada(intent)
 
@@ -536,4 +485,4 @@ with col2:
         if speaker == "user":
             st.markdown(f"*You:* {text}")
         else:
-            st.markdown(f"*Bot:* {text}")
+            st.markdown(f"*Bot:* {text}")   
