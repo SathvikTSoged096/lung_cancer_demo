@@ -7,7 +7,3 @@ gTTS
 requests
 gdown
 
-# for login/auth
-streamlit-authenticator
-bcrypt
-PyYAML
