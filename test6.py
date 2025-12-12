@@ -6,12 +6,16 @@ Single-file Streamlit demo with robust Grad-CAM visualization.
 - Run inference with a Keras model (resnet50_lung_cancer.h5)
 - Show Grad-CAM overlay + annotated bounding box for a representative slice
 - Kannada chatbot with TTS
+
+Added: Google Drive downloader to fetch model file if missing.
 """
 
 import os
 import io
+import re
 import tempfile
 import traceback
+import requests
 
 import streamlit as st
 import numpy as np
@@ -23,51 +27,127 @@ import tensorflow as tf
 from tensorflow.keras.models import load_model as keras_load_model
 
 # ---------- CONFIG ----------
-import requests
+# Local path where model will be saved/loaded
+MODEL_PATH = r"C:\Users\UDAY\Documents\majorProject\anotherProject\resnet50_lung_cancer.h5"
+INPUT_SIZE = (224, 224)
+CLASS_MAP = {0: "Normal", 1: "Benign", 2: "Malignant"}
 
+# Google Drive file id for the .h5 model (replace with yours if different)
 GOOGLE_DRIVE_ID = "1QN6jTC-pZYXmazzA-vMcnDksLORKFbUA"
 GOOGLE_DRIVE_URL = f"https://drive.google.com/uc?export=download&id={GOOGLE_DRIVE_ID}"
+# ----------------------------
 
-def download_from_google_drive(url, output_path):
+logo = None
+for candidate in ["generated-image(11).png", "assets/imagel.png", "logo2.png", "assets/logo2.png", "logo.png", "assets/logo.png"]:
+    try:
+        if os.path.exists(candidate):
+            logo = Image.open(candidate)
+            break
+    except Exception:
+        logo = None
+        break
+
+if logo is not None:
+    try:
+        st.image(logo, width=150)
+    except Exception:
+        pass
+
+# ---------- Google Drive downloader ----------
+def _get_confirm_token_from_text(text):
     """
-    Downloads a file from Google Drive (handles confirmation token).
+    Google sometimes returns an HTML page with a confirm token embedded.
+    Try to extract it via a regex.
+    """
+    # patterns that sometimes appear in Drive confirmation pages
+    m = re.search(r"confirm=([0-9A-Za-z_-]+)&", text)
+    if m:
+        return m.group(1)
+    m = re.search(r"download_warning[0-9]+=([0-9A-Za-z_-]+)", text)
+    if m:
+        return m.group(1)
+    # fallback: search typical confirm= token
+    m = re.search(r"confirm=([0-9A-Za-z_-]+)\"", text)
+    if m:
+        return m.group(1)
+    return None
+
+def download_from_google_drive(url, output_path, progress_callback=None):
+    """
+    Downloads a file from Google Drive (handles confirmation token for large files).
+    progress_callback: optional function(percent_int) to receive progress updates.
     """
     session = requests.Session()
     response = session.get(url, stream=True)
+    token = None
 
-    # Google Drive sometimes returns confirmation token for large files
-    def get_confirm_token(resp):
-        for key, val in resp.cookies.items():
-            if key.startswith("download_warning"):
-                return val
-        return None
+    # First try cookie-based token
+    for key, val in response.cookies.items():
+        if key.startswith("download_warning"):
+            token = val
+            break
 
-    token = get_confirm_token(response)
+    # If not in cookies try to parse HTML for confirm token
+    if token is None:
+        try:
+            text = response.text
+            token = _get_confirm_token_from_text(text)
+        except Exception:
+            token = None
+
     if token:
-        response = session.get(url + "&confirm=" + token, stream=True)
+        # re-request including confirm token
+        url_with_confirm = url + "&confirm=" + token
+        response = session.get(url_with_confirm, stream=True)
 
-    with open(output_path, "wb") as f:
-        for chunk in response.iter_content(32768):
+    # Get total length for progress (may be None)
+    total = response.headers.get('Content-Length')
+    if total is not None:
+        total = int(total)
+
+    # Write to temp file then move to final to avoid partial overwrite
+    tmp_path = output_path + ".part"
+    with open(tmp_path, "wb") as f:
+        downloaded = 0
+        chunk_size = 32768
+        for chunk in response.iter_content(chunk_size):
             if chunk:
                 f.write(chunk)
-
+                downloaded += len(chunk)
+                if progress_callback and total:
+                    progress_callback(int(downloaded * 100 / total))
+    os.replace(tmp_path, output_path)
     return output_path
+
+# --- Model loader (cached) ---
 @st.cache_resource(show_spinner=False)
 def load_keras_model(path):
+    # If path doesn't exist, attempt to download from Google Drive
     if not os.path.exists(path):
-        st.warning("Model not found locally. Downloading from Google Drive...")
         try:
-            download_from_google_drive(GOOGLE_DRIVE_URL, path)
-            st.success("Model downloaded successfully!")
+            # Inform user via Streamlit (outside cache this would show; inside cache we return info)
+            # We'll still attempt download, but return None + message in case of failure
+            download_dir = os.path.dirname(path)
+            if download_dir and not os.path.exists(download_dir):
+                os.makedirs(download_dir, exist_ok=True)
+            # Download using requests (this may take time)
+            try:
+                # Provide a simple progress callback using st.session_state to communicate progress
+                def _progress_callback(pct):
+                    # store progress in session_state so UI can access it if needed
+                    st.session_state["_download_progress"] = pct
+                download_from_google_drive(GOOGLE_DRIVE_URL, path, progress_callback=_progress_callback)
+            except Exception as e:
+                return None, f"Google Drive download error: {e}"
         except Exception as e:
-            return None, f"Google Drive download error: {e}"
+            return None, f"Download setup error: {e}"
 
+    # Attempt to load the model
     try:
         model = keras_load_model(path)
         return model, f"Loaded model from: {path}"
     except Exception as e:
         return None, f"Error loading model: {e}"
-
 
 # --- Preprocess helpers ---
 def preprocess_slice(slice_img, target_size=INPUT_SIZE):
@@ -241,7 +321,7 @@ def run_inference_with_gradcam(model, volume_array, return_gradcam=True):
 KANNADA_TEMPLATES = {
     "greeting": "ನಮಸ್ತೆ! 나는 ನಿಮ್ಮ ಲಂಗ್-ಕ್ಯಾನ್ಸರ್ ಪ್ರೋಟೋಟೈಪ್ ಚಾಟ್‌ಬಾಟ್. ನಿಮಗೆ ಹೇಗೆ ಸಹಾಯ ಮಾಡಬಹುದು?",
     "inference_result": "ಮೌಲ್ಯಮಾಪನ ಫಲಿತಾಂಶ:\n\nಫಲಿತಾಂಶ: {label}\nconfidence (ಸ್ಕೋರ್): {score:.3f}\nನೋಟ್: {notes}",
-    "explain_how": "ಈ ಮಾಡೆಲ್ 3D CT ವಾಲ್ಯೂಮ್ ಗಳನ್ನು ಒಳಗೆ ತೆಗೆದುಕೊಂಡು ಕಂಡುಬರುವ ಗುಣಲಕ್ಷಣಗಳನ್ನು ಆಧರಿಸಿ ಅನುಮಾನಿತ ತಂತು/ನೋಡ್ ಗಳನ್ನು ಗುರುತಿಸುತ್ತದೆ.",
+    "explain_how": "ಈ ಮಾಡೆಲ್ 3D CT ವಾಲ್ಯೂಮ್ ಗಳನ್ನು ಒಳಗೆ ತೆಗೆದುಕೊಂಡು ಕಂಡುಬರುವ ಗುಣಲಕ್ಷಣಗಳನ್ನು ಆಧರಿಸಿ ಅನುಮಾನಿತ ತಂತು/ನೋಡ್ ಗಳನ್ನು ಗುರುತిస్తుంది.",
     "accuracy": "ಮಾಡೆಲ್‌ಗಾಗಿ ಉದಾಹರಣೆ accuracy = {acc:.2f}.",
     "limitations": "ಸೀಮಿತತೆ: ಇದು ಡೆಮೊ; ವೈದ್ಯ ಸಲಹೆ ಅವಶ್ಯಕ.",
     "thanks": "ಧನ್ಯವಾದಗಳು!"
@@ -302,6 +382,11 @@ with col1:
     if model is not None:
         st.success(model_msg)
     else:
+        # If download progress exists show it
+        progress = st.session_state.get("_download_progress", None)
+        if progress is not None and isinstance(progress, int):
+            st.info(f"Model not found locally. Download in progress: {progress}%")
+            st.progress(progress)
         st.info(model_msg)
 
     uploaded_files = st.file_uploader("Upload CT scan slices (.jpg) or a single .npy", type=["jpg","jpeg","npy"], accept_multiple_files=True)
@@ -406,7 +491,3 @@ with col2:
             st.markdown(f"*You:* {text}")
         else:
             st.markdown(f"*Bot:* {text}")
-
-
-
-
