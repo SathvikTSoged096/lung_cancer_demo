@@ -23,37 +23,51 @@ import tensorflow as tf
 from tensorflow.keras.models import load_model as keras_load_model
 
 # ---------- CONFIG ----------
-MODEL_PATH = r"C:\Users\UDAY\Documents\majorProject\anotherProject\resnet50_lung_cancer.h5"
-INPUT_SIZE = (224, 224)
-CLASS_MAP = {0: "Normal", 1: "Benign", 2: "Malignant"}
-# ----------------------------
+import requests
 
-logo = None
-for candidate in ["generated-image(11).png", "assets/imagel.png", "logo2.png", "assets/logo2.png", "logo.png", "assets/logo.png"]:
-    try:
-        if os.path.exists(candidate):
-            logo = Image.open(candidate)
-            break
-    except Exception:
-        logo = None
-        break
+GOOGLE_DRIVE_ID = "1QN6jTC-pZYXmazzA-vMcnDksLORKFbUA"
+GOOGLE_DRIVE_URL = f"https://drive.google.com/uc?export=download&id={GOOGLE_DRIVE_ID}"
 
-if logo is not None:
-    try:
-        st.image(logo, width=150)
-    except Exception:
-        pass
+def download_from_google_drive(url, output_path):
+    """
+    Downloads a file from Google Drive (handles confirmation token).
+    """
+    session = requests.Session()
+    response = session.get(url, stream=True)
 
-# --- Model loader (cached) ---
+    # Google Drive sometimes returns confirmation token for large files
+    def get_confirm_token(resp):
+        for key, val in resp.cookies.items():
+            if key.startswith("download_warning"):
+                return val
+        return None
+
+    token = get_confirm_token(response)
+    if token:
+        response = session.get(url + "&confirm=" + token, stream=True)
+
+    with open(output_path, "wb") as f:
+        for chunk in response.iter_content(32768):
+            if chunk:
+                f.write(chunk)
+
+    return output_path
 @st.cache_resource(show_spinner=False)
 def load_keras_model(path):
-    if path is None or not os.path.exists(path):
-        return None, f"Model not found at: {path}"
+    if not os.path.exists(path):
+        st.warning("Model not found locally. Downloading from Google Drive...")
+        try:
+            download_from_google_drive(GOOGLE_DRIVE_URL, path)
+            st.success("Model downloaded successfully!")
+        except Exception as e:
+            return None, f"Google Drive download error: {e}"
+
     try:
         model = keras_load_model(path)
         return model, f"Loaded model from: {path}"
     except Exception as e:
         return None, f"Error loading model: {e}"
+
 
 # --- Preprocess helpers ---
 def preprocess_slice(slice_img, target_size=INPUT_SIZE):
@@ -392,6 +406,7 @@ with col2:
             st.markdown(f"*You:* {text}")
         else:
             st.markdown(f"*Bot:* {text}")
+
 
 
 
