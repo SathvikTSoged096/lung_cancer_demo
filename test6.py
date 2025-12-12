@@ -1,18 +1,18 @@
 """
 lung_chatbot_streamlit.py
-Single-file Streamlit demo with robust Grad-CAM visualization.
+Single-file Streamlit demo with robust Grad-CAM visualization + Google Drive model fetch.
 
-- Upload .jpg CT slices (grayscale) or a .npy CT volume
-- Run inference with a Keras model (resnet50_lung_cancer.h5)
-- Show Grad-CAM overlay + annotated bounding box for a representative slice
-- Kannada chatbot with TTS
-
-Added: Google Drive downloader to fetch model file if missing.
+- Downloads model from Google Drive if not present locally.
+- Verifies HDF5 signature before attempting to load.
+- Shows download progress in UI.
+- Keeps original features: upload .jpg/.npy, inference, Grad-CAM, Kannada chatbot + TTS.
 """
 
 import os
 import io
 import re
+import time
+import stat
 import tempfile
 import traceback
 import requests
@@ -27,129 +27,194 @@ import tensorflow as tf
 from tensorflow.keras.models import load_model as keras_load_model
 
 # ---------- CONFIG ----------
-# Local path where model will be saved/loaded
-MODEL_PATH = r"C:\Users\UDAY\Documents\majorProject\anotherProject\resnet50_lung_cancer.h5"
+MODEL_PATH = r"resnet50_lung_cancer.h5"  # local target path (change if you want)
 INPUT_SIZE = (224, 224)
 CLASS_MAP = {0: "Normal", 1: "Benign", 2: "Malignant"}
 
-# Google Drive file id for the .h5 model (replace with yours if different)
+# Google Drive file id for the .h5 model (replace with yours if needed)
 GOOGLE_DRIVE_ID = "1QN6jTC-pZYXmazzA-vMcnDksLORKFbUA"
-GOOGLE_DRIVE_URL = f"https://drive.google.com/uc?export=download&id={GOOGLE_DRIVE_ID}"
+DRIVE_BASE_URL = "https://drive.google.com/uc?export=download&id="
 # ----------------------------
 
-logo = None
-for candidate in ["generated-image(11).png", "assets/imagel.png", "logo2.png", "assets/logo2.png", "logo.png", "assets/logo.png"]:
-    try:
-        if os.path.exists(candidate):
-            logo = Image.open(candidate)
-            break
-    except Exception:
-        logo = None
-        break
+# ----------------- Utilities for downloading and verifying -----------------
+def _extract_confirm_token_from_html(html_text: str):
+    patterns = [
+        r'confirm=([0-9A-Za-z_-]+)&amp;id=',
+        r'confirm=([0-9A-Za-z_-]+)&',
+        r'download_warning[0-9]+=([0-9A-Za-z_-]+)',
+        r'confirm=([0-9A-Za-z_-]+)\"',
+        r'name="confirm" value="([0-9A-Za-z_-]+)"'
+    ]
+    for p in patterns:
+        m = re.search(p, html_text)
+        if m:
+            return m.group(1)
+    return None
 
-if logo is not None:
+def _looks_like_hdf5(path):
     try:
-        st.image(logo, width=150)
+        with open(path, "rb") as f:
+            sig = f.read(8)
+        return sig == b'\x89HDF\r\n\x1a\n'
+    except Exception:
+        return False
+
+def download_from_google_drive_strict(file_id: str, out_path: str, progress_cb=None, timeout=30):
+    """
+    Robustly download a file from Google Drive, handling confirm tokens for large files.
+    Verifies file size and HDF5 signature; returns (out_path, None) on success or (None, error_message).
+    progress_cb(percent_int) optional callback for progress updates.
+    """
+    url = DRIVE_BASE_URL + file_id
+    session = requests.Session()
+
+    try:
+        resp = session.get(url, stream=True, timeout=timeout)
+    except Exception as e:
+        return None, f"Initial request failed: {e}"
+
+    # read a small prefix to check if HTML returned
+    start = b""
+    try:
+        # resp.raw is available when stream=True
+        start = resp.raw.read(2048)
+    except Exception:
+        start = resp.content[:2048]
+
+    text_start = ""
+    try:
+        text_start = start.decode("utf-8", errors="ignore")
+    except Exception:
+        text_start = ""
+
+    # token from cookies
+    token = None
+    for k, v in resp.cookies.items():
+        if k.startswith("download_warning"):
+            token = v
+            break
+
+    if token is None:
+        token = _extract_confirm_token_from_html(text_start)
+
+    if token:
+        try:
+            resp = session.get(url + "&confirm=" + token, stream=True, timeout=timeout)
+        except Exception as e:
+            return None, f"Request with confirm token failed: {e}"
+
+    # Save to temp .part file while tracking progress
+    tmp = out_path + ".part"
+    try:
+        total = resp.headers.get("Content-Length")
+        total = int(total) if total is not None else None
+        chunk_size = 32768
+        downloaded = 0
+        with open(tmp, "wb") as f:
+            for chunk in resp.iter_content(chunk_size):
+                if chunk:
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if progress_cb and total:
+                        pct = int(downloaded * 100 / total)
+                        progress_cb(min(pct, 100))
+    except Exception as e:
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except Exception:
+            pass
+        return None, f"Failed while writing file: {e}"
+
+    # sanity size check
+    try:
+        size = os.path.getsize(tmp)
+    except Exception:
+        size = 0
+
+    if size < 1024:
+        # read content for debug
+        try:
+            with open(tmp, "rb") as f:
+                sample = f.read(4096).decode("utf-8", errors="ignore")
+        except Exception:
+            sample = "<couldn't read partial file>"
+        try:
+            os.remove(tmp)
+        except Exception:
+            pass
+        return None, f"Downloaded file too small ({size} bytes). Likely an HTML page. Leading content:\n\n{sample[:1000]}"
+
+    # move into place
+    try:
+        os.replace(tmp, out_path)
+    except Exception as e:
+        return None, f"Failed to rename temp file: {e}"
+
+    # chmod
+    try:
+        os.chmod(out_path, stat.S_IREAD | stat.S_IWRITE)
     except Exception:
         pass
 
-# ---------- Google Drive downloader ----------
-def _get_confirm_token_from_text(text):
-    """
-    Google sometimes returns an HTML page with a confirm token embedded.
-    Try to extract it via a regex.
-    """
-    # patterns that sometimes appear in Drive confirmation pages
-    m = re.search(r"confirm=([0-9A-Za-z_-]+)&", text)
-    if m:
-        return m.group(1)
-    m = re.search(r"download_warning[0-9]+=([0-9A-Za-z_-]+)", text)
-    if m:
-        return m.group(1)
-    # fallback: search typical confirm= token
-    m = re.search(r"confirm=([0-9A-Za-z_-]+)\"", text)
-    if m:
-        return m.group(1)
-    return None
-
-def download_from_google_drive(url, output_path, progress_callback=None):
-    """
-    Downloads a file from Google Drive (handles confirmation token for large files).
-    progress_callback: optional function(percent_int) to receive progress updates.
-    """
-    session = requests.Session()
-    response = session.get(url, stream=True)
-    token = None
-
-    # First try cookie-based token
-    for key, val in response.cookies.items():
-        if key.startswith("download_warning"):
-            token = val
-            break
-
-    # If not in cookies try to parse HTML for confirm token
-    if token is None:
+    # verify HDF5 signature
+    if not _looks_like_hdf5(out_path):
         try:
-            text = response.text
-            token = _get_confirm_token_from_text(text)
+            with open(out_path, "rb") as f:
+                sample = f.read(2048).decode("utf-8", errors="ignore")
         except Exception:
-            token = None
+            sample = "<couldn't read file for debug>"
+        # keep file (user may want to inspect), but report error
+        return None, ("Downloaded file does not start with HDF5 signature. "
+                      f"File size: {size} bytes. Leading content (first 1000 chars):\n\n{sample[:1000]}\n\n"
+                      "This usually means Google Drive returned an HTML page (permission/preview) or the file is corrupted. "
+                      "Ensure the Drive file is the binary .h5 and 'Anyone with the link' is enabled.")
+    return out_path, None
 
-    if token:
-        # re-request including confirm token
-        url_with_confirm = url + "&confirm=" + token
-        response = session.get(url_with_confirm, stream=True)
+# ---------- Model presence & load flow ----------
+def ensure_model_present_ui(file_id: str, target_path: str):
+    """
+    Ensures model exists locally. If missing, downloads with progress and returns (True, message) or (False, error).
+    This function interacts with Streamlit UI (progress bar / info messages).
+    """
+    if os.path.exists(target_path):
+        return True, f"Model already exists at: {target_path}"
 
-    # Get total length for progress (may be None)
-    total = response.headers.get('Content-Length')
-    if total is not None:
-        total = int(total)
+    st.info("Model not found locally. Attempting download from Google Drive...")
+    progress = st.progress(0)
+    status_text = st.empty()
 
-    # Write to temp file then move to final to avoid partial overwrite
-    tmp_path = output_path + ".part"
-    with open(tmp_path, "wb") as f:
-        downloaded = 0
-        chunk_size = 32768
-        for chunk in response.iter_content(chunk_size):
-            if chunk:
-                f.write(chunk)
-                downloaded += len(chunk)
-                if progress_callback and total:
-                    progress_callback(int(downloaded * 100 / total))
-    os.replace(tmp_path, output_path)
-    return output_path
-
-# --- Model loader (cached) ---
-@st.cache_resource(show_spinner=False)
-def load_keras_model(path):
-    # If path doesn't exist, attempt to download from Google Drive
-    if not os.path.exists(path):
+    def progress_cb(pct):
         try:
-            # Inform user via Streamlit (outside cache this would show; inside cache we return info)
-            # We'll still attempt download, but return None + message in case of failure
-            download_dir = os.path.dirname(path)
-            if download_dir and not os.path.exists(download_dir):
-                os.makedirs(download_dir, exist_ok=True)
-            # Download using requests (this may take time)
-            try:
-                # Provide a simple progress callback using st.session_state to communicate progress
-                def _progress_callback(pct):
-                    # store progress in session_state so UI can access it if needed
-                    st.session_state["_download_progress"] = pct
-                download_from_google_drive(GOOGLE_DRIVE_URL, path, progress_callback=_progress_callback)
-            except Exception as e:
-                return None, f"Google Drive download error: {e}"
-        except Exception as e:
-            return None, f"Download setup error: {e}"
+            progress.progress(pct)
+            status_text.info(f"Downloading model: {pct}%")
+        except Exception:
+            pass
 
-    # Attempt to load the model
+    out, err = download_from_google_drive_strict(file_id, target_path, progress_cb=progress_cb)
+    if err:
+        progress.empty()
+        status_text.error("Download failed.")
+        return False, err
+    progress.progress(100)
+    status_text.success("Download complete.")
+    return True, f"Downloaded model to {out}"
+
+@st.cache_resource(show_spinner=False)
+def load_keras_model_cached(path):
+    """
+    Load the Keras model from disk (cached to avoid reloading repeatedly).
+    Return (model_or_none, message)
+    """
+    if not os.path.exists(path):
+        return None, f"Model not found at: {path}"
     try:
         model = keras_load_model(path)
         return model, f"Loaded model from: {path}"
     except Exception as e:
         return None, f"Error loading model: {e}"
 
-# --- Preprocess helpers ---
+# ----------------- Preprocessing, GradCAM, overlay, inference (unchanged) -----------------
 def preprocess_slice(slice_img, target_size=INPUT_SIZE):
     img = slice_img.astype(np.float32)
     if img.ndim == 2:
@@ -158,7 +223,6 @@ def preprocess_slice(slice_img, target_size=INPUT_SIZE):
     img = img / 255.0
     return img.astype(np.float32)
 
-# --- Find last conv layer robustly ---
 def find_last_conv_layer(model):
     for layer in reversed(model.layers):
         name = layer.name.lower()
@@ -168,43 +232,25 @@ def find_last_conv_layer(model):
             return layer.name
     raise ValueError("No convolutional layer found in model to compute Grad-CAM.")
 
-# --- Grad-CAM helper (robust to multi-output models) ---
 def make_gradcam_heatmap(img_array, model, pred_index=None, last_conv_layer_name=None):
-    """
-    img_array: (1,H,W,3) preprocessed input
-    model: keras model
-    pred_index: class index to compute gradients for (if None, use top predicted)
-    last_conv_layer_name: optional layer name; if None, will auto-detect
-    Returns: heatmap (H_raw, W_raw) normalized 0..1 (numpy float32)
-    """
     if last_conv_layer_name is None:
         last_conv_layer_name = find_last_conv_layer(model)
 
     grad_model = tf.keras.models.Model([model.inputs], [model.get_layer(last_conv_layer_name).output, model.output])
-
     with tf.GradientTape() as tape:
         conv_outputs, predictions = grad_model(img_array)
-
-        # If model.output is list/tuple, pick the first output (adjust if necessary)
         if isinstance(predictions, (list, tuple)):
             predictions = predictions[0]
-
-        # Ensure tensor
         predictions = tf.convert_to_tensor(predictions)
-
         if pred_index is None:
             pred_index = tf.argmax(predictions[0])
-
         loss = predictions[:, pred_index]
 
     grads = tape.gradient(loss, conv_outputs)
     pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
-
     conv_outputs = conv_outputs[0]
-
     weighted = conv_outputs * pooled_grads[tf.newaxis, tf.newaxis, :]
     heatmap = tf.reduce_sum(weighted, axis=-1)
-
     heatmap = np.maximum(heatmap, 0)
     max_val = tf.reduce_max(heatmap)
     if max_val == 0:
@@ -212,9 +258,7 @@ def make_gradcam_heatmap(img_array, model, pred_index=None, last_conv_layer_name
     heatmap /= max_val
     return heatmap.numpy().astype(np.float32)
 
-# --- Overlay helper ---
 def overlay_heatmap_on_image(orig_rgb, heatmap, thresh=0.35):
-    # orig_rgb: uint8 RGB
     if orig_rgb.dtype != np.uint8:
         orig = (255 * (orig_rgb - orig_rgb.min()) / (orig_rgb.ptp() + 1e-8)).astype(np.uint8)
     else:
@@ -222,7 +266,7 @@ def overlay_heatmap_on_image(orig_rgb, heatmap, thresh=0.35):
 
     hmap_u8 = (heatmap * 255).astype(np.uint8)
     hmap_resized = cv2.resize(hmap_u8, (orig.shape[1], orig.shape[0]))
-    heatmap_color = cv2.applyColorMap(hmap_resized, cv2.COLORMAP_JET)  # BGR
+    heatmap_color = cv2.applyColorMap(hmap_resized, cv2.COLORMAP_JET)
     overlay_bgr = cv2.addWeighted(cv2.cvtColor(orig, cv2.COLOR_RGB2BGR), 0.6, heatmap_color, 0.4, 0)
     overlay_rgb = cv2.cvtColor(overlay_bgr, cv2.COLOR_BGR2RGB)
 
@@ -238,7 +282,6 @@ def overlay_heatmap_on_image(orig_rgb, heatmap, thresh=0.35):
 
     return overlay_rgb, annotated_rgb
 
-# --- Robust predict handling + Grad-CAM pipeline ---
 def run_inference_with_gradcam(model, volume_array, return_gradcam=True):
     try:
         if model is None:
@@ -268,7 +311,6 @@ def run_inference_with_gradcam(model, volume_array, return_gradcam=True):
         X = np.stack(preproc_list, axis=0).astype(np.float32)
 
         preds = model.predict(X, batch_size=16)
-        # coalesce list outputs
         if isinstance(preds, (list, tuple)):
             preds = preds[0]
         preds = np.asarray(preds)
@@ -276,7 +318,6 @@ def run_inference_with_gradcam(model, volume_array, return_gradcam=True):
             preds = np.expand_dims(preds, axis=0)
         if preds.ndim != 2:
             return {"error": f"Unexpected prediction shape: {preds.shape}", "trace": None, "gradcam": None}
-        # apply softmax if needed
         row_sums = preds.sum(axis=1)
         if not np.allclose(row_sums, 1.0, atol=1e-3):
             preds = tf.nn.softmax(preds, axis=-1).numpy()
@@ -317,11 +358,11 @@ def run_inference_with_gradcam(model, volume_array, return_gradcam=True):
     except Exception as e:
         return {"error": str(e), "trace": traceback.format_exc(), "gradcam": None}
 
-# --- Kannada response templates & NLU ---
+# ----------------- Kannada chatbot / TTS -----------------
 KANNADA_TEMPLATES = {
     "greeting": "ನಮಸ್ತೆ! 나는 ನಿಮ್ಮ ಲಂಗ್-ಕ್ಯಾನ್ಸರ್ ಪ್ರೋಟೋಟೈಪ್ ಚಾಟ್‌ಬಾಟ್. ನಿಮಗೆ ಹೇಗೆ ಸಹಾಯ ಮಾಡಬಹುದು?",
     "inference_result": "ಮೌಲ್ಯಮಾಪನ ಫಲಿತಾಂಶ:\n\nಫಲಿತಾಂಶ: {label}\nconfidence (ಸ್ಕೋರ್): {score:.3f}\nನೋಟ್: {notes}",
-    "explain_how": "ಈ ಮಾಡೆಲ್ 3D CT ವಾಲ್ಯೂಮ್ ಗಳನ್ನು ಒಳಗೆ ತೆಗೆದುಕೊಂಡು ಕಂಡುಬರುವ ಗುಣಲಕ್ಷಣಗಳನ್ನು ಆಧರಿಸಿ ಅನುಮಾನಿತ ತಂತು/ನೋಡ್ ಗಳನ್ನು ಗುರುತిస్తుంది.",
+    "explain_how": "ಈ ಮಾಡೆಲ್ 3D CT ವಾಲ್ಯೂಮ್ ಗಳನ್ನು ಒಳಗೆ ತೆಗೆದುಕೊಂಡು ಕಂಡುಬರುವ ಗುಣಲಕ್ಷಣಗಳನ್ನು ಆಧರಿಸಿ ಅನುಮಾನಿತ ತಂತು/ನೋಡ್ ಗಳನ್ನು ಗುರುತಿಸುತ್ತದೆ.",
     "accuracy": "ಮಾಡೆಲ್‌ಗಾಗಿ ಉದಾಹರಣೆ accuracy = {acc:.2f}.",
     "limitations": "ಸೀಮಿತತೆ: ಇದು ಡೆಮೊ; ವೈದ್ಯ ಸಲಹೆ ಅವಶ್ಯಕ.",
     "thanks": "ಧನ್ಯವಾದಗಳು!"
@@ -359,7 +400,6 @@ def answer_in_kannada(intent, context=None):
         return "ದಯವಿಟ್ಟು JPG ಸ್ಲೈಸುಗಳನ್ನು ಅಥವಾ .npy ಫೈಲ್ ಅನ್ನು ಅಪ್‌ಲೋಡ್ ಮಾಡಿ ಮತ್ತು 'Run Inference' ಒತ್ತಿ."
     return "ಕ್ಷಮಿಸಿ, ನನಗೆ ಅರ್ಥವಾಗಲಿಲ್ಲ."
 
-# --- TTS helper ---
 def tts_kannada(text):
     try:
         tts = gTTS(text=text, lang='kn')
@@ -370,7 +410,7 @@ def tts_kannada(text):
         st.error("TTS error: " + str(e))
         return None
 
-# --- Streamlit UI ---
+# ----------------- Streamlit UI -----------------
 st.title("Lung Cancer Detector")
 st.markdown("*DISCLAIMER:* This is a demo prototype. Not a medical diagnosis tool.")
 
@@ -378,16 +418,22 @@ col1, col2 = st.columns([1, 1])
 
 with col1:
     st.header("Model / Inference")
-    model, model_msg = load_keras_model(MODEL_PATH)
-    if model is not None:
-        st.success(model_msg)
+
+    # Ensure model is present (downloads if missing)
+    ok, msg = ensure_model_present_ui(GOOGLE_DRIVE_ID, MODEL_PATH)
+    if not ok:
+        st.error("Model download/verification failed:")
+        st.code(msg)
+        st.info("Make sure the Drive file is the binary .h5 and sharing is set to 'Anyone with the link → Viewer'.")
+        model = None
     else:
-        # If download progress exists show it
-        progress = st.session_state.get("_download_progress", None)
-        if progress is not None and isinstance(progress, int):
-            st.info(f"Model not found locally. Download in progress: {progress}%")
-            st.progress(progress)
-        st.info(model_msg)
+        st.success(msg)
+        model, load_msg = load_keras_model_cached(MODEL_PATH)
+        if model is None:
+            st.error("Failed to load model:")
+            st.code(load_msg)
+        else:
+            st.success(load_msg)
 
     uploaded_files = st.file_uploader("Upload CT scan slices (.jpg) or a single .npy", type=["jpg","jpeg","npy"], accept_multiple_files=True)
     arr = None
