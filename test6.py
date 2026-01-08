@@ -41,16 +41,17 @@ hashed_passwords = stauth.utilities.hasher.Hasher(
 print(hashed_passwords)
 import streamlit_authenticator as stauth
 
-# ---------- AUTH CONFIG ----------
+import streamlit_authenticator as stauth
+
 credentials = {
     "usernames": {
         "admin": {
             "name": "Admin User",
-            "password": "$2b$12$VtXJ..."   # ← paste hash here
+            "password": "$2b$12$A1x...."   # ← paste admin hash
         },
         "doctor": {
             "name": "Doctor",
-            "password": "$2b$12$k9P3..."   # ← paste hash here
+            "password": "$2b$12$Z9k...."   # ← paste doctor hash
         }
     }
 }
@@ -65,7 +66,7 @@ authenticator = stauth.Authenticate(
     cookie_key,
     cookie_expiry_days
 )
-# --------------------------------
+
 
 
 
@@ -584,6 +585,7 @@ with col2:
         else:
             st.markdown(f"*Bot:* {text}")
 cookie_key = st.secrets["auth"]["cookie_key"]
+
 
 
 
