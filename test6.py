@@ -126,9 +126,7 @@ if st.session_state.page == "signup":
                 st.success("Registration successful! Please log in.")
                 st.session_state.page = "login"
                 st.rerun()
-            except:
-                st.error("Username already exists")
-
+            
     with col2:
         if st.button("Cancel"):
             st.session_state.page = "login"
@@ -653,6 +651,7 @@ with col2:
             st.markdown(f"*You:* {text}")
         else:
             st.markdown(f"*Bot:* {text}")
+
 
 
 
