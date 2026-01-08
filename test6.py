@@ -82,8 +82,6 @@ if "authenticated" not in st.session_state:
 # ---------------------------------------------
 
 
-username = st.text_input("Username", key="login_username")
-password = st.text_input("Password", type="password", key="login_password")
 
 if st.session_state.page == "login":
 
@@ -655,6 +653,7 @@ with col2:
             st.markdown(f"*You:* {text}")
         else:
             st.markdown(f"*Bot:* {text}")
+
 
 
 
