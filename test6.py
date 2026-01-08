@@ -73,7 +73,6 @@ if "signup_success" not in st.session_state:
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
 # ---------------------------------------------
-st.session_state["show_signup"]
 
 
 username = st.text_input("Username", key="login_username")
@@ -633,6 +632,7 @@ with col2:
             st.markdown(f"*You:* {text}")
         else:
             st.markdown(f"*Bot:* {text}")
+
 
 
 
