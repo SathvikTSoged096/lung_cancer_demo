@@ -94,11 +94,7 @@ st.set_page_config(page_title="Lung Cancer Demo Chatbot (Kannada)", layout="wide
 
     # 👇 keep ALL your existing code here (model loading, upload, inference, chat)
 
-elif authentication_status is False:
-    st.error("❌ Invalid username or password")
 
-elif authentication_status is None:
-    st.warning("🔐 Please enter your login credentials")
 
 # Try loading logo from local file (place logo2.png in the same folder as this script)
 try:
@@ -578,6 +574,7 @@ with col2:
             st.markdown(f"*You:* {text}")
         else:
             st.markdown(f"*Bot:* {text}")
+
 
 
 
