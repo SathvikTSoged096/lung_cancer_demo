@@ -32,11 +32,11 @@ credentials = {
     "usernames": {
         "admin": {
             "name": "Admin User",
-            "password": "$2b$12$z1s8H4m0F6m9qv5kZ7cPpe9FQ2mZrZP7y2J0nH4n8ZkLqK8y7M2SO"
+            "password": "admin123"
         },
         "doctor": {
             "name": "Doctor",
-            "password": "$2b$12$R4JY3fNq0sJpX2VJZ6Dq5e6b7n9Z9kJYHk8L9K1z2Hq8mQwY2"
+            "password": "doctor123"
         }
     }
 }
@@ -574,6 +574,7 @@ with col2:
             st.markdown(f"*You:* {text}")
         else:
             st.markdown(f"*Bot:* {text}")
+
 
 
 
