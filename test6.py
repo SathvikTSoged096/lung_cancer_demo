@@ -522,4 +522,5 @@ with col2:
             st.markdown(f"*You:* {text}")
         else:
             st.markdown(f"*Bot:* {text}")
+cookie_key = st.secrets["auth"]["cookie_key"]
 
