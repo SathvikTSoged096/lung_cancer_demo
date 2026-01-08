@@ -68,10 +68,26 @@ authenticator = stauth.Authenticate(
 
 
 st.set_page_config(page_title="Lung Cancer Demo Chatbot (Kannada)", layout="wide")
-name, authentication_status, username = authenticator.login(
-    location="main",
-    key="login"
-)
+authenticator.login(location="main")
+
+authentication_status = st.session_state.get("authentication_status")
+name = st.session_state.get("name")
+username = st.session_state.get("username")
+if authentication_status:
+
+    authenticator.logout("Logout", "sidebar")
+    st.sidebar.success(f"Welcome {name}")
+
+    # 🔽 YOUR ENTIRE EXISTING APP UI GOES HERE 🔽
+    st.title("Lung Cancer Detector")
+    st.markdown("*DISCLAIMER:* This is a demo prototype. Not a medical diagnosis tool.")
+    # (keep all your existing code below)
+
+elif authentication_status is False:
+    st.error("❌ Invalid username or password")
+
+elif authentication_status is None:
+    st.warning("🔐 Please enter your login credentials")
 
 
 
@@ -582,6 +598,7 @@ with col2:
         else:
             st.markdown(f"*Bot:* {text}")
 cookie_key = st.secrets["auth"]["cookie_key"]
+
 
 
 
