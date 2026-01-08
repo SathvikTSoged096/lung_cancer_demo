@@ -63,21 +63,21 @@ authenticator = stauth.Authenticate(
 
 st.set_page_config(page_title="Lung Cancer Demo Chatbot (Kannada)", layout="wide")
 
-authenticator.login(location="main")
+st.subheader("🔐 Login")
 
-authentication_status = st.session_state.get("authentication_status")
-name = st.session_state.get("name")
+username = st.text_input("Username")
+password = st.text_input("Password", type="password")
 
-if authentication_status is None:
-    st.warning("🔐 Please log in")
-    st.stop()
-
-if authentication_status is False:
-    st.error("❌ Invalid username or password")
-    st.stop()
-
-authenticator.logout("Logout", "sidebar")
-st.sidebar.success(f"Welcome {name}")
+if st.button("Login"):
+    ok, name, role = verify_user(username, password)
+    if ok:
+        st.session_state["authenticated"] = True
+        st.session_state["name"] = name
+        st.session_state["role"] = role
+        st.success(f"Welcome {name}")
+        st.rerun()
+    else:
+        st.error("Invalid username or password")
 
 
 
@@ -579,6 +579,7 @@ with col2:
             st.markdown(f"*You:* {text}")
         else:
             st.markdown(f"*Bot:* {text}")
+
 
 
 
