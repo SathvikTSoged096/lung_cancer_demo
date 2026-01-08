@@ -24,6 +24,10 @@ from PIL import Image
 import cv2
 from gtts import gTTS
 import gdown
+import streamlit_authenticator as stauth
+import yaml
+from yaml.loader import SafeLoader
+
 
 import tensorflow as tf
 from tensorflow.keras.models import load_model as keras_load_model
@@ -518,3 +522,4 @@ with col2:
             st.markdown(f"*You:* {text}")
         else:
             st.markdown(f"*Bot:* {text}")
+
