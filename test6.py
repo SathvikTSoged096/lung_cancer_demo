@@ -32,6 +32,41 @@ from yaml.loader import SafeLoader
 import tensorflow as tf
 from tensorflow.keras.models import load_model as keras_load_model
 
+credentials = {
+    "usernames": {
+        "admin": {
+            "name": "Admin User",
+            "password": stauth.Hasher(["admin123"]).generate()[0]
+        },
+        "doctor": {
+            "name": "Doctor",
+            "password": stauth.Hasher(["doctor123"]).generate()[0]
+        }
+    }
+}
+
+cookie_name = "lung_cancer_auth"
+cookie_key = st.secrets["auth"]["cookie_key"]
+cookie_expiry_days = 1
+
+authenticator = stauth.Authenticate(
+    credentials=credentials,
+    cookie_name=cookie_name,
+    cookie_key=cookie_key,
+    cookie_expiry_days=cookie_expiry_days
+)
+# ----------------------------------------------------------
+
+
+st.set_page_config(page_title="Lung Cancer Demo Chatbot (Kannada)", layout="wide")
+name, authentication_status, username = authenticator.login(
+    location="main",
+    key="login"
+)
+
+
+
+
 # ---------- CONFIG ----------
 MODEL_ID = "1QN6jTC-pZYXmazzA-vMcnDksLORKFbUA"
 # Use the 'uc?id=' endpoint which returns the raw file rather than the "view" HTML page
@@ -43,6 +78,21 @@ CLASS_MAP = {0: "Normal", 1: "Benign", 2: "Malignant"}
 # ----------------------------
 
 st.set_page_config(page_title="Lung Cancer Demo Chatbot (Kannada)", layout="wide")
+if authentication_status:
+
+    authenticator.logout("Logout", "sidebar")
+    st.sidebar.success(f"Welcome {name}")
+
+    st.title("Lung Cancer Detector")
+    st.markdown("*DISCLAIMER:* This is a demo prototype. Not a medical diagnosis tool.")
+
+    # 👇 keep ALL your existing code here (model loading, upload, inference, chat)
+
+elif authentication_status is False:
+    st.error("❌ Invalid username or password")
+
+elif authentication_status is None:
+    st.warning("🔐 Please enter your login credentials")
 
 # Try loading logo from local file (place logo2.png in the same folder as this script)
 try:
@@ -523,4 +573,5 @@ with col2:
         else:
             st.markdown(f"*Bot:* {text}")
 cookie_key = st.secrets["auth"]["cookie_key"]
+
 
