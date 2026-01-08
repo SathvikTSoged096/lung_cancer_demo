@@ -32,6 +32,13 @@ from auth_db import init_db, create_user, verify_user
 
 init_db()
 
+# ---------- Page State ----------
+if "page" not in st.session_state:
+    st.session_state.page = "login"   # login | signup | app
+
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+# -------------------------------
 
 credentials = {
     "usernames": {
@@ -78,33 +85,39 @@ if "authenticated" not in st.session_state:
 username = st.text_input("Username", key="login_username")
 password = st.text_input("Password", type="password", key="login_password")
 
-if st.button("Login"):
-    ok, name, role = verify_user(username, password)
-    if ok:
-        st.session_state["authenticated"] = True
-        st.session_state["name"] = name
-        st.session_state["role"] = role
-        st.rerun()
-    else:
-        st.error("Invalid username or password")
+if st.session_state.page == "login":
 
-# Show success message after signup
-if st.session_state["signup_success"]:
-    st.success("✅ Registration successful. Please log in.")
-    st.session_state["signup_success"] = False
+    st.title("🔐 Login")
+
+    username = st.text_input("Username", key="login_user")
+    password = st.text_input("Password", type="password", key="login_pass")
+
+    if st.button("Login"):
+        ok, name, role = verify_user(username, password)
+        if ok:
+            st.session_state.authenticated = True
+            st.session_state.name = name
+            st.session_state.role = role
+            st.session_state.page = "app"
+            st.rerun()
+        else:
+            st.error("Invalid username or password")
+
+    if st.button("🆕 New user? Sign up"):
+        st.session_state.page = "signup"
+        st.rerun()
+
+    st.stop()   # ⛔ STOP HERE — DO NOT LOAD APP
 
 # Button to open signup
-if st.button("🆕 New user? Sign up"):
-    st.session_state["show_signup"] = True
-    st.rerun()
-if st.session_state["show_signup"]:
+if st.session_state.page == "signup":
 
-    st.subheader("🆕 Create New Account")
+    st.title("🆕 Create Account")
 
-    new_username = st.text_input("Username", key="su_username")
-    new_name = st.text_input("Full Name", key="su_name")
-    new_email = st.text_input("Email", key="su_email")
-    new_password = st.text_input("Password", type="password", key="su_password")
+    new_username = st.text_input("Username")
+    new_name = st.text_input("Full Name")
+    new_email = st.text_input("Email")
+    new_password = st.text_input("Password", type="password")
 
     col1, col2 = st.columns(2)
 
@@ -112,28 +125,38 @@ if st.session_state["show_signup"]:
         if st.button("Register"):
             try:
                 create_user(new_username, new_name, new_email, new_password)
-                st.session_state["show_signup"] = False
-                st.session_state["signup_success"] = True
-
-                # 🔒 CLEAR signup fields
-                for k in ["su_username", "su_name", "su_email", "su_password"]:
-                    st.session_state[k] = ""
-
+                st.success("Registration successful! Please log in.")
+                st.session_state.page = "login"
                 st.rerun()
-            except Exception:
+            except:
                 st.error("Username already exists")
 
     with col2:
         if st.button("Cancel"):
-            st.session_state["show_signup"] = False
-
-            # Clear signup inputs
-            for k in ["su_username", "su_name", "su_email", "su_password"]:
-                st.session_state[k] = ""
-
+            st.session_state.page = "login"
             st.rerun()
-if not st.session_state.get("authenticated"):
-    st.stop()
+
+    st.stop()   # ⛔ STOP HERE
+
+
+if st.session_state.page == "app" and st.session_state.authenticated:
+
+    st.sidebar.success(f"Welcome {st.session_state.name}")
+
+    if st.sidebar.button("Logout"):
+        st.session_state.authenticated = False
+        st.session_state.page = "login"
+        st.rerun()
+
+    # 🔽 YOUR EXISTING APP CODE 🔽
+    st.title("Lung Cancer Detector")
+    st.markdown("*DISCLAIMER: Demo only*")
+
+    # model loading
+    # upload
+    # inference
+    # grad-cam
+    # chat
 
 
 
@@ -632,6 +655,7 @@ with col2:
             st.markdown(f"*You:* {text}")
         else:
             st.markdown(f"*Bot:* {text}")
+
 
 
 
