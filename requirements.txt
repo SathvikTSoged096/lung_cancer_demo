@@ -1,4 +1,5 @@
 streamlit
+streamlit-authenticator
 tensorflow
 numpy
 Pillow
@@ -6,4 +7,4 @@ opencv-python-headless
 gTTS
 requests
 gdown
-
+PyYAML
