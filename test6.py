@@ -58,7 +58,7 @@ authenticator = stauth.Authenticate(
 
 st.set_page_config(page_title="Lung Cancer Demo Chatbot (Kannada)", layout="wide")
 
-aauthenticator.login(location="main")
+authenticator.login(location="main")
 
 authentication_status = st.session_state.get("authentication_status")
 name = st.session_state.get("name")
@@ -574,6 +574,7 @@ with col2:
             st.markdown(f"*You:* {text}")
         else:
             st.markdown(f"*Bot:* {text}")
+
 
 
 
