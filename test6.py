@@ -32,15 +32,25 @@ from yaml.loader import SafeLoader
 import tensorflow as tf
 from tensorflow.keras.models import load_model as keras_load_model
 
+import streamlit_authenticator as stauth
+
+hashed_passwords = stauth.utilities.hasher.Hasher(
+    ["admin123", "doctor123"]
+).generate()
+
+print(hashed_passwords)
+import streamlit_authenticator as stauth
+
+# ---------- AUTH CONFIG ----------
 credentials = {
     "usernames": {
         "admin": {
             "name": "Admin User",
-            "password": stauth.Hasher(["admin123"]).generate()[0]
+            "password": "$2b$12$VtXJ..."   # ← paste hash here
         },
         "doctor": {
             "name": "Doctor",
-            "password": stauth.Hasher(["doctor123"]).generate()[0]
+            "password": "$2b$12$k9P3..."   # ← paste hash here
         }
     }
 }
@@ -50,12 +60,13 @@ cookie_key = st.secrets["auth"]["cookie_key"]
 cookie_expiry_days = 1
 
 authenticator = stauth.Authenticate(
-    credentials=credentials,
-    cookie_name=cookie_name,
-    cookie_key=cookie_key,
-    cookie_expiry_days=cookie_expiry_days
+    credentials,
+    cookie_name,
+    cookie_key,
+    cookie_expiry_days
 )
-# ----------------------------------------------------------
+# --------------------------------
+
 
 
 st.set_page_config(page_title="Lung Cancer Demo Chatbot (Kannada)", layout="wide")
@@ -573,5 +584,6 @@ with col2:
         else:
             st.markdown(f"*Bot:* {text}")
 cookie_key = st.secrets["auth"]["cookie_key"]
+
 
 
