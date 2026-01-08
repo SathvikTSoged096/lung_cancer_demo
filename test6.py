@@ -27,23 +27,19 @@ import gdown
 import tensorflow as tf
 from tensorflow.keras.models import load_model as keras_load_model
 import streamlit_authenticator as stauth
-passwords = ["admin123", "doctor123"]
-hashed = Hasher(passwords).generate()
 
-print(hashed)
 credentials = {
     "usernames": {
         "admin": {
             "name": "Admin User",
-            "password": "$2b$12$REAL_HASH_FOR_admin123"
+            "password": "$2b$12$z1s8H4m0F6m9qv5kZ7cPpe9FQ2mZrZP7y2J0nH4n8ZkLqK8y7M2SO"
         },
         "doctor": {
             "name": "Doctor",
-            "password": "$2b$12$REAL_HASH_FOR_doctor123"
+            "password": "$2b$12$R4JY3fNq0sJpX2VJZ6Dq5e6b7n9Z9kJYHk8L9K1z2Hq8mQwY2"
         }
     }
 }
-
 
 
 cookie_name = "lung_cancer_auth"
@@ -62,21 +58,19 @@ authenticator = stauth.Authenticate(
 
 st.set_page_config(page_title="Lung Cancer Demo Chatbot (Kannada)", layout="wide")
 
-authenticator.login(location="main")
+aauthenticator.login(location="main")
 
 authentication_status = st.session_state.get("authentication_status")
 name = st.session_state.get("name")
-username = st.session_state.get("username")
 
 if authentication_status is None:
-    st.warning("🔐 Please log in or sign up")
+    st.warning("🔐 Please log in")
     st.stop()
 
 if authentication_status is False:
     st.error("❌ Invalid username or password")
     st.stop()
 
-# ✅ USER IS AUTHENTICATED — LOGOUT ONLY ONCE
 authenticator.logout("Logout", "sidebar")
 st.sidebar.success(f"Welcome {name}")
 
@@ -580,6 +574,7 @@ with col2:
             st.markdown(f"*You:* {text}")
         else:
             st.markdown(f"*Bot:* {text}")
+
 
 
 
