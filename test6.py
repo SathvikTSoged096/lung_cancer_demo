@@ -24,31 +24,19 @@ from PIL import Image
 import cv2
 from gtts import gTTS
 import gdown
-import streamlit_authenticator as stauth
-import yaml
-from yaml.loader import SafeLoader
-
-
 import tensorflow as tf
 from tensorflow.keras.models import load_model as keras_load_model
-
-import streamlit_authenticator as stauth
-
-
-
-import streamlit_authenticator as stauth
-
 import streamlit_authenticator as stauth
 
 credentials = {
     "usernames": {
         "admin": {
             "name": "Admin User",
-            "password": "$2b$12$A1x...."   # ← paste admin hash
+            "password": "$2b$12$A1x...."
         },
         "doctor": {
             "name": "Doctor",
-            "password": "$2b$12$Z9k...."   # ← paste doctor hash
+            "password": "$2b$12$Z9k...."
         }
     }
 }
@@ -68,26 +56,26 @@ authenticator = stauth.Authenticate(
 
 
 st.set_page_config(page_title="Lung Cancer Demo Chatbot (Kannada)", layout="wide")
+
 authenticator.login(location="main")
 
 authentication_status = st.session_state.get("authentication_status")
 name = st.session_state.get("name")
 username = st.session_state.get("username")
-if authentication_status:
 
-    authenticator.logout("Logout", "sidebar")
-    st.sidebar.success(f"Welcome {name}")
-
-    # 🔽 YOUR ENTIRE EXISTING APP UI GOES HERE 🔽
-    st.title("Lung Cancer Detector")
-    st.markdown("*DISCLAIMER:* This is a demo prototype. Not a medical diagnosis tool.")
-    # (keep all your existing code below)
-
-elif authentication_status is False:
-    st.error("❌ Invalid username or password")
-
-elif authentication_status is None:
+# 🔒 STOP APP IF NOT LOGGED IN
+if authentication_status is None:
     st.warning("🔐 Please enter your login credentials")
+    st.stop()
+
+if authentication_status is False:
+    st.error("❌ Invalid username or password")
+    st.stop()
+
+# ✅ USER AUTHENTICATED
+authenticator.logout("Logout", "sidebar")
+st.sidebar.success(f"Welcome {name}")
+
 
 
 
@@ -597,7 +585,7 @@ with col2:
             st.markdown(f"*You:* {text}")
         else:
             st.markdown(f"*Bot:* {text}")
-cookie_key = st.secrets["auth"]["cookie_key"]
+
 
 
 
