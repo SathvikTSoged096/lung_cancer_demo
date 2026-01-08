@@ -8,3 +8,4 @@ gTTS
 requests
 gdown
 PyYAML
+bcrypt
