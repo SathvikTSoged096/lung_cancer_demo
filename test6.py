@@ -28,6 +28,11 @@ import tensorflow as tf
 from tensorflow.keras.models import load_model as keras_load_model
 import streamlit_authenticator as stauth
 
+from auth_db import init_db, create_user, verify_user
+
+init_db()
+
+
 credentials = {
     "usernames": {
         "admin": {
@@ -574,6 +579,7 @@ with col2:
             st.markdown(f"*You:* {text}")
         else:
             st.markdown(f"*Bot:* {text}")
+
 
 
 
