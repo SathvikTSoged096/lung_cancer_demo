@@ -34,9 +34,7 @@ from tensorflow.keras.models import load_model as keras_load_model
 
 import streamlit_authenticator as stauth
 
-hashed_passwords = stauth.utilities.hasher.Hasher(
-    ["admin123", "doctor123"]
-).generate()
+
 
 print(hashed_passwords)
 import streamlit_authenticator as stauth
@@ -585,6 +583,7 @@ with col2:
         else:
             st.markdown(f"*Bot:* {text}")
 cookie_key = st.secrets["auth"]["cookie_key"]
+
 
 
 
