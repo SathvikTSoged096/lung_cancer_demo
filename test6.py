@@ -80,6 +80,18 @@ if st.button("Login"):
         st.error("Invalid username or password")
 
 
+with st.expander("🆕 New user? Sign up"):
+    new_username = st.text_input("New Username")
+    new_name = st.text_input("Full Name")
+    new_email = st.text_input("Email")
+    new_password = st.text_input("New Password", type="password")
+
+    if st.button("Register"):
+        try:
+            create_user(new_username, new_name, new_email, new_password)
+            st.success("User registered successfully! Please login.")
+        except Exception as e:
+            st.error("Username already exists")
 
 
 
@@ -579,6 +591,7 @@ with col2:
             st.markdown(f"*You:* {text}")
         else:
             st.markdown(f"*Bot:* {text}")
+
 
 
 
