@@ -28,18 +28,19 @@ import tensorflow as tf
 from tensorflow.keras.models import load_model as keras_load_model
 import streamlit_authenticator as stauth
 
-credentials = {
+credentials = credentials = {
     "usernames": {
         "admin": {
-            "name": "Sathvik",
-            "password": "Sathvik@096"
+            "name": "Admin User",
+            "password": "$2b$12$X8Yzq2f9mM0kZ9l1x7Yv9e0V..."
         },
         "doctor": {
             "name": "Doctor",
-            "password": "$2b$12$Z9k...."
+            "password": "$2b$12$P3A0yE2q9nD8bLwHkT..."
         }
     }
 }
+
 
 cookie_name = "lung_cancer_auth"
 cookie_key = st.secrets["auth"]["cookie_key"]
@@ -575,6 +576,7 @@ with col2:
             st.markdown(f"*You:* {text}")
         else:
             st.markdown(f"*Bot:* {text}")
+
 
 
 
