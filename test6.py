@@ -63,18 +63,18 @@ authentication_status = st.session_state.get("authentication_status")
 name = st.session_state.get("name")
 username = st.session_state.get("username")
 
-# 🔒 STOP APP IF NOT LOGGED IN
 if authentication_status is None:
-    st.warning("🔐 Please enter your login credentials")
+    st.warning("🔐 Please log in or sign up")
     st.stop()
 
 if authentication_status is False:
     st.error("❌ Invalid username or password")
     st.stop()
 
-# ✅ USER AUTHENTICATED
+# ✅ USER IS AUTHENTICATED — LOGOUT ONLY ONCE
 authenticator.logout("Logout", "sidebar")
 st.sidebar.success(f"Welcome {name}")
+
 
 
 
@@ -575,6 +575,7 @@ with col2:
             st.markdown(f"*You:* {text}")
         else:
             st.markdown(f"*Bot:* {text}")
+
 
 
 
