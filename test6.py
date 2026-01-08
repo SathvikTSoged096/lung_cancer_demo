@@ -94,6 +94,8 @@ with st.expander("🆕 New user? Sign up"):
             st.error("Username already exists")
 
 
+if not st.session_state.get("authenticated"):
+    st.stop()
 
 
 
@@ -591,6 +593,7 @@ with col2:
             st.markdown(f"*You:* {text}")
         else:
             st.markdown(f"*Bot:* {text}")
+
 
 
 
