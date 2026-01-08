@@ -36,7 +36,6 @@ import streamlit_authenticator as stauth
 
 
 
-print(hashed_passwords)
 import streamlit_authenticator as stauth
 
 import streamlit_authenticator as stauth
@@ -583,6 +582,7 @@ with col2:
         else:
             st.markdown(f"*Bot:* {text}")
 cookie_key = st.secrets["auth"]["cookie_key"]
+
 
 
 
