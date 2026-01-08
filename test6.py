@@ -80,6 +80,7 @@ st.sidebar.success(f"Welcome {name}")
 
 
 
+
 # ---------- CONFIG ----------
 MODEL_ID = "1QN6jTC-pZYXmazzA-vMcnDksLORKFbUA"
 # Use the 'uc?id=' endpoint which returns the raw file rather than the "view" HTML page
@@ -574,6 +575,7 @@ with col2:
             st.markdown(f"*You:* {text}")
         else:
             st.markdown(f"*Bot:* {text}")
+
 
 
 
