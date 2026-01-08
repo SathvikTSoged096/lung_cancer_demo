@@ -91,13 +91,6 @@ CLASS_MAP = {0: "Normal", 1: "Benign", 2: "Malignant"}
 # ----------------------------
 
 st.set_page_config(page_title="Lung Cancer Demo Chatbot (Kannada)", layout="wide")
-if authentication_status:
-
-    authenticator.logout("Logout", "sidebar")
-    st.sidebar.success(f"Welcome {name}")
-
-    st.title("Lung Cancer Detector")
-    st.markdown("*DISCLAIMER:* This is a demo prototype. Not a medical diagnosis tool.")
 
     # 👇 keep ALL your existing code here (model loading, upload, inference, chat)
 
@@ -585,6 +578,7 @@ with col2:
             st.markdown(f"*You:* {text}")
         else:
             st.markdown(f"*Bot:* {text}")
+
 
 
 
