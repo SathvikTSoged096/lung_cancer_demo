@@ -27,7 +27,10 @@ import gdown
 import tensorflow as tf
 from tensorflow.keras.models import load_model as keras_load_model
 import streamlit_authenticator as stauth
+passwords = ["admin123", "doctor123"]
+hashed = Hasher(passwords).generate()
 
+print(hashed)
 credentials = {
     "usernames": {
         "admin": {
@@ -577,6 +580,7 @@ with col2:
             st.markdown(f"*You:* {text}")
         else:
             st.markdown(f"*Bot:* {text}")
+
 
 
 
