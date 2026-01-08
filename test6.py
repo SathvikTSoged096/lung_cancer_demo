@@ -31,8 +31,8 @@ import streamlit_authenticator as stauth
 credentials = {
     "usernames": {
         "admin": {
-            "name": "Admin User",
-            "password": "$2b$12$A1x...."
+            "name": "Sathvik",
+            "password": "Sathvik@096"
         },
         "doctor": {
             "name": "Doctor",
@@ -574,6 +574,7 @@ with col2:
             st.markdown(f"*You:* {text}")
         else:
             st.markdown(f"*Bot:* {text}")
+
 
 
 
