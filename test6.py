@@ -63,14 +63,18 @@ authenticator = stauth.Authenticate(
 
 st.set_page_config(page_title="Lung Cancer Demo Chatbot (Kannada)", layout="wide")
 
-st.session_state["show_signup"]
-
+# -------- Session State Initialization --------
 if "show_signup" not in st.session_state:
     st.session_state["show_signup"] = False
 
 if "signup_success" not in st.session_state:
     st.session_state["signup_success"] = False
-st.subheader("🔐 Login")
+
+if "authenticated" not in st.session_state:
+    st.session_state["authenticated"] = False
+# ---------------------------------------------
+st.session_state["show_signup"]
+
 
 username = st.text_input("Username", key="login_username")
 password = st.text_input("Password", type="password", key="login_password")
@@ -629,6 +633,7 @@ with col2:
             st.markdown(f"*You:* {text}")
         else:
             st.markdown(f"*Bot:* {text}")
+
 
 
 
