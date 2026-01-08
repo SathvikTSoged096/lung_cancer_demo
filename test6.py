@@ -63,10 +63,17 @@ authenticator = stauth.Authenticate(
 
 st.set_page_config(page_title="Lung Cancer Demo Chatbot (Kannada)", layout="wide")
 
+st.session_state["show_signup"]
+
+if "show_signup" not in st.session_state:
+    st.session_state["show_signup"] = False
+
+if "signup_success" not in st.session_state:
+    st.session_state["signup_success"] = False
 st.subheader("🔐 Login")
 
-username = st.text_input("Username")
-password = st.text_input("Password", type="password")
+username = st.text_input("Username", key="login_username")
+password = st.text_input("Password", type="password", key="login_password")
 
 if st.button("Login"):
     ok, name, role = verify_user(username, password)
@@ -74,28 +81,57 @@ if st.button("Login"):
         st.session_state["authenticated"] = True
         st.session_state["name"] = name
         st.session_state["role"] = role
-        st.success(f"Welcome {name}")
         st.rerun()
     else:
         st.error("Invalid username or password")
 
+# Show success message after signup
+if st.session_state["signup_success"]:
+    st.success("✅ Registration successful. Please log in.")
+    st.session_state["signup_success"] = False
 
-with st.expander("🆕 New user? Sign up"):
-    new_username = st.text_input("New Username")
-    new_name = st.text_input("Full Name")
-    new_email = st.text_input("Email")
-    new_password = st.text_input("New Password", type="password")
+# Button to open signup
+if st.button("🆕 New user? Sign up"):
+    st.session_state["show_signup"] = True
+    st.rerun()
+if st.session_state["show_signup"]:
 
-    if st.button("Register"):
-        try:
-            create_user(new_username, new_name, new_email, new_password)
-            st.success("User registered successfully! Please login.")
-        except Exception as e:
-            st.error("Username already exists")
+    st.subheader("🆕 Create New Account")
 
+    new_username = st.text_input("Username", key="su_username")
+    new_name = st.text_input("Full Name", key="su_name")
+    new_email = st.text_input("Email", key="su_email")
+    new_password = st.text_input("Password", type="password", key="su_password")
 
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("Register"):
+            try:
+                create_user(new_username, new_name, new_email, new_password)
+                st.session_state["show_signup"] = False
+                st.session_state["signup_success"] = True
+
+                # 🔒 CLEAR signup fields
+                for k in ["su_username", "su_name", "su_email", "su_password"]:
+                    st.session_state[k] = ""
+
+                st.rerun()
+            except Exception:
+                st.error("Username already exists")
+
+    with col2:
+        if st.button("Cancel"):
+            st.session_state["show_signup"] = False
+
+            # Clear signup inputs
+            for k in ["su_username", "su_name", "su_email", "su_password"]:
+                st.session_state[k] = ""
+
+            st.rerun()
 if not st.session_state.get("authenticated"):
     st.stop()
+
 
 
 
@@ -593,6 +629,7 @@ with col2:
             st.markdown(f"*You:* {text}")
         else:
             st.markdown(f"*Bot:* {text}")
+
 
 
 
