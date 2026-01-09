@@ -27,9 +27,11 @@ import gdown
 import tensorflow as tf
 from tensorflow.keras.models import load_model as keras_load_model
 import streamlit_authenticator as stauth
-
+from datetime import datetime
 from auth_db import init_db, create_user, verify_user
-
+from reportlab.lib.pagesizes import A4 
+from reportlab.pdfgen import canvas 
+from reportlab.lib.units import cm
 
 init_db()
 
@@ -278,6 +280,26 @@ def preprocess_slice(slice_img, target_size=INPUT_SIZE):
     img = cv2.resize(img, target_size)
     img = img / 255.0
     return img.astype(np.float32)
+
+def generate_patient_report(name, label, score):
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+    c = canvas.Canvas(tmp.name, pagesize=A4)
+
+    w, h = A4
+    c.setFont("Helvetica-Bold", 20)
+    c.drawCentredString(w/2, h-2*cm, "Lung Cancer Detection Report")
+    c.setFont("Helvetica", 12)
+
+    y = h - 4*cm
+    c.drawString(2*cm, y, f"Patient Name: {name}"); y -= cm
+    c.drawString(2*cm, y, f"Date: {datetime.now()}"); y -= cm
+    c.drawString(2*cm, y, f"Result: {label}"); y -= cm
+    c.drawString(2*cm, y, f"Confidence: {score:.3f}")
+
+    c.showPage()
+    c.save()
+    return tmp.name
+# ------------------------------------------------
 
 
 # --- Find last conv layer robustly ---
@@ -677,6 +699,26 @@ with col2:
             st.markdown(f"*Bot:* {text}")
 
 
+with col2:
+    st.header("🧾 Patient Report")
+
+    pname = st.text_input("Patient Name")
+
+    if st.button("Generate PDF"):
+        if "last_result" not in st.session_state:
+            st.warning("Run inference first")
+        elif pname.strip() == "":
+            st.warning("Enter patient name")
+        else:
+            r = st.session_state.last_result
+            pdf = generate_patient_report(pname, r["label"], r["score"])
+            with open(pdf, "rb") as f:
+                st.download_button(
+                    "Download Report",
+                    f,
+                    file_name=f"{pname}_report.pdf",
+                    mime="application/pdf"
+                )
 
 
 
