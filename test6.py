@@ -70,6 +70,22 @@ authenticator = stauth.Authenticate(
 
 st.set_page_config(page_title="Lung Cancer Demo Chatbot (Kannada)", layout="wide")
 
+hide_streamlit_style = """
+    <style>
+    /* Hide main menu */
+    #MainMenu {visibility: hidden;}
+
+    /* Hide footer */
+    footer {visibility: hidden;}
+
+    /* Hide header (top bar with fork / github) */
+    header {visibility: hidden;}
+    </style>
+"""
+st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+
+
+
 # -------- Session State Initialization --------
 if "signup_error" not in st.session_state:
     st.session_state.signup_error = ""
@@ -651,6 +667,7 @@ with col2:
             st.markdown(f"*You:* {text}")
         else:
             st.markdown(f"*Bot:* {text}")
+
 
 
 
