@@ -668,6 +668,29 @@ with col2:
         else:
             st.markdown(f"*Bot:* {text}")
 
+st.markdown(
+    """
+    <style>
+    /* Hide Streamlit header */
+    header {visibility: hidden;}
+
+    /* Hide Streamlit footer */
+    footer {visibility: hidden;}
+
+    /* Hide Streamlit menu (top-right three dots) */
+    #MainMenu {visibility: hidden;}
+
+    /* Hide Streamlit status widgets / floating icons */
+    .st-emotion-cache-1dp5vir {visibility: hidden;}
+    .st-emotion-cache-1q1n0ol {visibility: hidden;}
+    .st-emotion-cache-6qob1r {visibility: hidden;}
+
+    /* Mobile bottom bar */
+    .st-emotion-cache-1avcm0n {display: none;}
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 
 
 
