@@ -303,24 +303,7 @@ def preprocess_slice(slice_img, target_size=INPUT_SIZE):
     img = img / 255.0
     return img.astype(np.float32)
 
-def generate_patient_report(name, label, score):
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-    c = canvas.Canvas(tmp.name, pagesize=A4)
 
-    w, h = A4
-    c.setFont("Helvetica-Bold", 20)
-    c.drawCentredString(w / 2, h - 2 * cm, "Lung Cancer Detection Report")
-    c.setFont("Helvetica", 12)
-
-    y = h - 4 * cm
-    c.drawString(2 * cm, y, f"Patient Name: {name}"); y -= cm
-    c.drawString(2 * cm, y, f"Date: {datetime.now().strftime('%d-%m-%Y %H:%M')}"); y -= cm
-    c.drawString(2 * cm, y, f"Result: {label}"); y -= cm
-    c.drawString(2 * cm, y, f"Confidence Score: {score:.3f}")
-
-    c.showPage()
-    c.save()
-    return tmp.name
 
 
 
@@ -513,26 +496,7 @@ def run_inference_with_gradcam(model, volume_array, return_gradcam=True):
     except Exception as e:
         return {"error": str(e), "trace": traceback.format_exc(), "gradcam": None}
 
-with col2:
-    st.header("🧾 Patient Report")
 
-    patient_name = st.text_input("Patient Name")
-
-    if st.button("Generate PDF"):
-        if "last_result" not in st.session_state:
-            st.warning("Run inference first")
-        elif patient_name.strip() == "":
-            st.warning("Enter patient name")
-        else:
-            r = st.session_state.last_result
-            pdf = generate_patient_report(patient_name, r["label"], r["score"])
-            with open(pdf, "rb") as f:
-                st.download_button(
-                    "⬇️ Download Report",
-                    f,
-                    file_name=f"{patient_name}_report.pdf",
-                    mime="application/pdf"
-                )
 
 
 
@@ -737,6 +701,7 @@ with col2:
             st.markdown(f"*You:* {text}")
         else:
             st.markdown(f"*Bot:* {text}")  
+
 
 
 
