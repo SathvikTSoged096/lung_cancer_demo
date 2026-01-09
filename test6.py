@@ -1,4 +1,4 @@
- """
+"""
 Lung cancer Streamlit demo (fixed)
 
 Changes made:
@@ -737,6 +737,7 @@ with col2:
             st.markdown(f"*You:* {text}")
         else:
             st.markdown(f"*Bot:* {text}")  
+
 
 
 
