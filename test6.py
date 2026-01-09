@@ -73,33 +73,7 @@ st.set_page_config(page_title="Lung Cancer Demo Chatbot (Kannada)", layout="wide
 
 
 
-st.markdown(
-    """
-    <style>
-    /* Remove header, footer, menu */
-    header, footer, #MainMenu {display: none !important;}
 
-    /* Hide Streamlit mobile UI elements */
-    div[data-testid="stToolbar"] {display: none !important;}
-    div[data-testid="stDecoration"] {display: none !important;}
-    div[data-testid="stStatusWidget"] {display: none !important;}
-
-    /* Hide bottom mobile action bar */
-    div[class*="bottom"], 
-    div[class*="toolbar"],
-    div[class*="emotion"],
-    div[class*="floating"] {
-        display: none !important;
-    }
-
-    /* Prevent extra mobile padding */
-    .block-container {
-        padding-bottom: 0 !important;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
 
 
 
@@ -107,7 +81,7 @@ st.markdown(
 
 # -------- Session State Initialization --------
 if "signup_error" not in st.session_state:
-    st.session_state.signup_error = ""
+    st.session_state.signup_error = False
 
 if "signup_success" not in st.session_state:
     st.session_state.signup_success = False
@@ -701,6 +675,7 @@ with col2:
             st.markdown(f"*You:* {text}")
         else:
             st.markdown(f"*Bot:* {text}")
+
 
 
 
