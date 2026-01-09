@@ -70,43 +70,35 @@ authenticator = stauth.Authenticate(
 
 st.set_page_config(page_title="Lung Cancer Demo Chatbot (Kannada)", layout="wide")
 
-hide_streamlit_style = """
-    <style>
-    /* Hide main menu */
-    #MainMenu {visibility: hidden;}
-
-    /* Hide footer */
-    footer {visibility: hidden;}
-
-    /* Hide header (top bar with fork / github) */
-    header {visibility: hidden;}
-    </style>
-"""
-st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+import streamlit as st
 
 st.markdown(
     """
     <style>
-    /* Hide Streamlit header */
+    /* Hide Streamlit header & footer */
     header {visibility: hidden;}
-
-    /* Hide Streamlit footer */
     footer {visibility: hidden;}
 
-    /* Hide Streamlit menu (top-right three dots) */
-    #MainMenu {visibility: hidden;}
+    /* Hide Streamlit menu (three dots / fork / cloud) */
+    #MainMenu {display: none;}
 
-    /* Hide Streamlit status widgets / floating icons */
-    .st-emotion-cache-1dp5vir {visibility: hidden;}
-    .st-emotion-cache-1q1n0ol {visibility: hidden;}
-    .st-emotion-cache-6qob1r {visibility: hidden;}
+    /* Hide mobile bottom bar & floating UI */
+    .st-emotion-cache-1dp5vir {display: none !important;}
+    .st-emotion-cache-1q1n0ol {display: none !important;}
+    .st-emotion-cache-6qob1r {display: none !important;}
+    .st-emotion-cache-1avcm0n {display: none !important;}
 
-    /* Mobile bottom bar */
-    .st-emotion-cache-1avcm0n {display: none;}
+    /* Hide bottom padding area (mobile safe-area) */
+    .st-emotion-cache-1cypcdb {display: none !important;}
+    .st-emotion-cache-1y4p8pa {display: none !important;}
+
+    /* Prevent mobile action bar */
+    div[data-testid="stToolbar"] {display: none !important;}
     </style>
     """,
     unsafe_allow_html=True
 )
+
 
 
 
@@ -691,6 +683,7 @@ with col2:
             st.markdown(f"*You:* {text}")
         else:
             st.markdown(f"*Bot:* {text}")
+
 
 
 
