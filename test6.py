@@ -702,7 +702,7 @@ with col2:
         else:
             st.markdown(f"*Bot:* {text}")
 
-check the code if there is error  correct it so it can run
+
 
 
 
