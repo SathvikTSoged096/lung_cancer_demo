@@ -29,11 +29,7 @@ from tensorflow.keras.models import load_model as keras_load_model
 import streamlit_authenticator as stauth
 
 from auth_db import init_db, create_user, verify_user
-from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
-from reportlab.lib.units import cm
-import tempfile
-from datetime import datetime
+
 
 init_db()
 
@@ -233,6 +229,12 @@ def _looks_like_html(path: str) -> bool:
 
 
 
+
+
+
+
+
+
 @st.cache_resource
 def load_keras_model(path: str):
     """
@@ -302,10 +304,6 @@ def preprocess_slice(slice_img, target_size=INPUT_SIZE):
     img = cv2.resize(img, target_size)
     img = img / 255.0
     return img.astype(np.float32)
-
-
-
-
 
 
 # --- Find last conv layer robustly ---
@@ -495,6 +493,8 @@ def run_inference_with_gradcam(model, volume_array, return_gradcam=True):
 
     except Exception as e:
         return {"error": str(e), "trace": traceback.format_exc(), "gradcam": None}
+
+
 
 
 
@@ -700,11 +700,9 @@ with col2:
         if speaker == "user":
             st.markdown(f"*You:* {text}")
         else:
-            st.markdown(f"*Bot:* {text}")  
+            st.markdown(f"*Bot:* {text}")
 
-
-
-
+check the code if there is error  correct it so it can run
 
 
 
